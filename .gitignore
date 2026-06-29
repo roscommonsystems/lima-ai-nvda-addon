@@ -1,0 +1,22 @@
+# Workflow artifacts — local only, never pushed
+docs/superpowers/
+.superpowers/
+
+# Build / packaging output
+*.nvda-addon
+/build/
+manifest.ini
+manifest-translated.ini
+*.mo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
