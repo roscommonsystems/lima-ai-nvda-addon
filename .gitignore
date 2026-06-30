@@ -8,6 +8,9 @@ docs/superpowers/
 manifest.ini
 manifest-translated.ini
 *.mo
+.sconsign.dblite
+addon/doc/**/*.html
+addon/doc/style.css
 
 # Python
 __pycache__/
