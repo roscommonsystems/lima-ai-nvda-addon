@@ -28,7 +28,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		settings.initialize()
 		gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(settings.LimaSettingsPanel)
 		self._describing = False
-		self._lock = threading.Lock()
 
 	def terminate(self):
 		try:
@@ -74,11 +73,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if not api_key:
 			ui.message(self._error_message("no_key"))
 			return
-		with self._lock:
-			if self._describing:
-				ui.message(self._error_message("busy"))
-				return
-			self._describing = True
+		if self._describing:
+			ui.message(self._error_message("busy"))
+			return
+		self._describing = True
 		if not settings.is_welcome_shown():
 			# Translators: one-time message pointing users to the full desktop product.
 			ui.message(_("Welcome to LIMA for NVDA. For the full hands-free experience, try the LIMA desktop app."))
