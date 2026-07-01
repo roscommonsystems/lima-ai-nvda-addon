@@ -11,4 +11,4 @@ LIMA (Low-Vision Intelligent Machine Assistant) integration for NVDA. A light, f
 
 Open NVDA menu → Preferences → Settings → **LIMA**, and paste your **OpenRouter API key**. You can also change the **model** (default `openai/gpt-4o-mini`).
 
-For the full hands-free experience, including continuous narration and computer control, use the **LIMA desktop app**.
+This add-on only describes the screen on demand. For the full hands-free experience, including continuous narration and voice-driven computer control, use the **LIMA desktop app**.

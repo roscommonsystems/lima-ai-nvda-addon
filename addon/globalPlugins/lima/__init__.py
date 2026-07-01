@@ -98,12 +98,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		thread.start()
 
 	def _run_describe(self, png, api_key, model):
+		message = self._error_message("api_error")
 		try:
 			message = vision.describe_image(png, api_key, model)
 		except vision.VisionError as e:
 			message = self._error_message(e.code)
 		except Exception:
-			message = self._error_message("api_error")
+			pass  # keep the default api_error message
 		finally:
 			self._describing = False
 		# NVDA speech must run on the main thread.
