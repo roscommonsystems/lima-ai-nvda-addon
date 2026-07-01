@@ -58,3 +58,12 @@ def test_describe_image_network_failure_raises_network_code():
 	with pytest.raises(vision.VisionError) as exc:
 		vision.describe_image(b"img", "key", "m", _opener=opener)
 	assert exc.value.code == "network"
+
+
+def test_describe_image_http_error_raises_api_error():
+	import urllib.error
+	http_error = urllib.error.HTTPError("https://openrouter.ai", 401, "Unauthorized", {}, None)
+	opener = _fake_opener(raise_exc=http_error)
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_image(b"img", "key", "m", _opener=opener)
+	assert exc.value.code == "api_error"
