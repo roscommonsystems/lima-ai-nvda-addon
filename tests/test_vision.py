@@ -67,3 +67,13 @@ def test_describe_image_http_error_raises_api_error():
 	with pytest.raises(vision.VisionError) as exc:
 		vision.describe_image(b"img", "key", "m", _opener=opener)
 	assert exc.value.code == "api_error"
+
+
+def test_describe_image_logs_the_real_error_on_network_failure(caplog):
+	import urllib.error
+	opener = _fake_opener(raise_exc=urllib.error.URLError("boom-detail"))
+	with caplog.at_level("ERROR"):
+		with pytest.raises(vision.VisionError):
+			vision.describe_image(b"img", "key", "m", _opener=opener)
+	# The real underlying error must be logged so a failure is diagnosable.
+	assert any("boom-detail" in r.getMessage() for r in caplog.records)

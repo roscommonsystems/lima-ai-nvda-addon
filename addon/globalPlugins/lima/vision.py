@@ -3,8 +3,11 @@
 
 import base64
 import json
+import logging
 import urllib.error
 import urllib.request
+
+log = logging.getLogger(__name__)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -57,10 +60,12 @@ def parse_response(body):
 	return text.strip()
 
 
-def describe_image(image_png_bytes, api_key, model, prompt=DEFAULT_PROMPT, timeout=20, _opener=None):
+def describe_image(image_png_bytes, api_key, model, prompt=DEFAULT_PROMPT, timeout=30, _opener=None):
 	"""POST the image to OpenRouter; return the description text.
 
 	Raises VisionError on any failure. `_opener` is injectable for tests.
+	The real underlying error is logged (it surfaces in NVDA's log) while the
+	caller still gets a stable, speakable code.
 	"""
 	payload = build_payload(image_png_bytes, model, prompt)
 	data = json.dumps(payload).encode("utf-8")
@@ -79,12 +84,20 @@ def describe_image(image_png_bytes, api_key, model, prompt=DEFAULT_PROMPT, timeo
 	try:
 		with opener(request, timeout=timeout) as response:
 			raw = response.read()
-	except urllib.error.HTTPError:
-		raise VisionError("api_error")
-	except (urllib.error.URLError, TimeoutError, OSError):
-		raise VisionError("network")
+	except urllib.error.HTTPError as e:
+		detail = ""
+		try:
+			detail = e.read().decode("utf-8", "replace")[:500]
+		except Exception:
+			pass
+		log.error("LIMA vision HTTP error %s: %s", getattr(e, "code", "?"), detail)
+		raise VisionError("api_error") from e
+	except (urllib.error.URLError, TimeoutError, OSError) as e:
+		log.error("LIMA vision could not reach the AI service: %r", e)
+		raise VisionError("network") from e
 	try:
 		body = json.loads(raw.decode("utf-8"))
-	except ValueError:
-		raise VisionError("empty")
+	except ValueError as e:
+		log.error("LIMA vision received a non-JSON response: %r", e)
+		raise VisionError("empty") from e
 	return parse_response(body)
