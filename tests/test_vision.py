@@ -77,3 +77,13 @@ def test_describe_image_logs_the_real_error_on_network_failure(caplog):
 			vision.describe_image(b"img", "key", "m", _opener=opener)
 	# The real underlying error must be logged so a failure is diagnosable.
 	assert any("boom-detail" in r.getMessage() for r in caplog.records)
+
+
+def test_build_payload_includes_default_max_tokens():
+	payload = vision.build_payload(b"img", "some/model")
+	assert payload["max_tokens"] == 150
+
+
+def test_build_payload_max_tokens_is_overridable():
+	payload = vision.build_payload(b"img", "some/model", max_tokens=42)
+	assert payload["max_tokens"] == 42

@@ -12,10 +12,12 @@ log = logging.getLogger(__name__)
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 DEFAULT_PROMPT = (
-	"You are assisting a blind user. Describe what is currently shown on the "
-	"screen in 2 to 4 short sentences. Be concise and factual. Focus on the "
-	"main content, layout, and any important visible text."
+	"Describe what is on the screen for a blind user in at most 2 to 3 short, "
+	"factual sentences. Name the main elements and any important visible text. "
+	"Do not narrate, interpret, tell a story, or describe moment-to-moment changes."
 )
+
+MAX_TOKENS = 150
 
 
 class VisionError(Exception):
@@ -29,12 +31,13 @@ class VisionError(Exception):
 		self.code = code
 
 
-def build_payload(image_png_bytes, model, prompt=DEFAULT_PROMPT):
+def build_payload(image_png_bytes, model, prompt=DEFAULT_PROMPT, max_tokens=MAX_TOKENS):
 	"""Build an OpenAI-format chat-completions body carrying one PNG image."""
 	b64 = base64.b64encode(image_png_bytes).decode("ascii")
 	data_url = "data:image/png;base64," + b64
 	return {
 		"model": model,
+		"max_tokens": max_tokens,
 		"messages": [
 			{
 				"role": "user",
@@ -60,14 +63,14 @@ def parse_response(body):
 	return text.strip()
 
 
-def describe_image(image_png_bytes, api_key, model, prompt=DEFAULT_PROMPT, timeout=30, _opener=None):
+def describe_image(image_png_bytes, api_key, model, prompt=DEFAULT_PROMPT, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
 	"""POST the image to OpenRouter; return the description text.
 
 	Raises VisionError on any failure. `_opener` is injectable for tests.
 	The real underlying error is logged (it surfaces in NVDA's log) while the
 	caller still gets a stable, speakable code.
 	"""
-	payload = build_payload(image_png_bytes, model, prompt)
+	payload = build_payload(image_png_bytes, model, prompt, max_tokens)
 	data = json.dumps(payload).encode("utf-8")
 	request = urllib.request.Request(
 		OPENROUTER_URL,
