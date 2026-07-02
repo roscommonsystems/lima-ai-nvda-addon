@@ -38,6 +38,9 @@ def _foreground_window_center():
 	from ctypes import wintypes
 
 	user32 = ctypes.windll.user32
+	user32.GetForegroundWindow.restype = wintypes.HWND
+	user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+	user32.GetWindowRect.restype = wintypes.BOOL
 	hwnd = user32.GetForegroundWindow()
 	if not hwnd:
 		return None

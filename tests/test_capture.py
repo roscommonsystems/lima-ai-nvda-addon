@@ -35,3 +35,9 @@ def test_select_active_geometry_falls_back_to_primary_when_outside_all():
 def test_select_active_geometry_single_monitor():
 	geometries = [(0, 0, 1920, 1080)]
 	assert capture.select_active_geometry((100, 100), geometries) == (0, 0, 1920, 1080)
+
+
+def test_select_active_geometry_boundary_belongs_to_second_monitor():
+	# Half-open interval: the seam pixel (1920,0) belongs to the second monitor.
+	geometries = [(0, 0, 1920, 1080), (1920, 0, 1920, 1080)]
+	assert capture.select_active_geometry((1920, 0), geometries) == (1920, 0, 1920, 1080)

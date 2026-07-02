@@ -87,3 +87,20 @@ def test_build_payload_includes_default_max_tokens():
 def test_build_payload_max_tokens_is_overridable():
 	payload = vision.build_payload(b"img", "some/model", max_tokens=42)
 	assert payload["max_tokens"] == 42
+
+
+def test_describe_image_threads_max_tokens_into_request():
+	captured = {}
+
+	@contextmanager
+	def opener(request, timeout=None):
+		captured["body"] = json.loads(request.data.decode("utf-8"))
+
+		class _Resp:
+			def read(self_inner):
+				return json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode("utf-8")
+
+		yield _Resp()
+
+	vision.describe_image(b"img", "key", "m", max_tokens=77, _opener=opener)
+	assert captured["body"]["max_tokens"] == 77
