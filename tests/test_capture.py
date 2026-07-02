@@ -15,3 +15,23 @@ def test_scaled_size_downscales_portrait_to_max_long_side():
 
 def test_scaled_size_at_boundary_is_unchanged():
 	assert capture.scaled_size(1280, 1024, 1280) == (1280, 1024)
+
+
+def test_select_active_geometry_point_in_second_monitor():
+	geometries = [(0, 0, 1920, 1080), (1920, 0, 1920, 1080)]
+	assert capture.select_active_geometry((2000, 500), geometries) == (1920, 0, 1920, 1080)
+
+
+def test_select_active_geometry_point_in_first_monitor():
+	geometries = [(0, 0, 1920, 1080), (1920, 0, 1920, 1080)]
+	assert capture.select_active_geometry((100, 100), geometries) == (0, 0, 1920, 1080)
+
+
+def test_select_active_geometry_falls_back_to_primary_when_outside_all():
+	geometries = [(0, 0, 1920, 1080), (1920, 0, 1920, 1080)]
+	assert capture.select_active_geometry((-500, -500), geometries) == (0, 0, 1920, 1080)
+
+
+def test_select_active_geometry_single_monitor():
+	geometries = [(0, 0, 1920, 1080)]
+	assert capture.select_active_geometry((100, 100), geometries) == (0, 0, 1920, 1080)
