@@ -18,8 +18,9 @@ __pycache__/
 .venv/
 venv/
 
-# Editor / OS
+# Editor / OS / tooling
 .vscode/
 .idea/
+.claude/
 Thumbs.db
 .DS_Store
