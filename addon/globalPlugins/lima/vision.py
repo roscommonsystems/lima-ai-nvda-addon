@@ -79,7 +79,7 @@ def describe_image(image_png_bytes, api_key, model, prompt=DEFAULT_PROMPT, max_t
 			"Authorization": "Bearer " + api_key,
 			"Content-Type": "application/json",
 			"HTTP-Referer": "https://roscommonsystems.com",
-			"X-Title": "LIMA NVDA Add-on",
+			"X-Title": "LIMA AI NVDA Add-on",
 		},
 		method="POST",
 	)

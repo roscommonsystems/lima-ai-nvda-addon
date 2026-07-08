@@ -42,8 +42,8 @@ def mark_welcome_shown():
 
 
 class LimaSettingsPanel(SettingsPanel):
-	# Translators: Title of the LIMA category in NVDA's settings dialog.
-	title = _("LIMA")
+	# Translators: Title of the LIMA AI category in NVDA's settings dialog.
+	title = _("LIMA AI")
 
 	def makeSettings(self, settingsSizer):
 		helper = gui.guiHelper.BoxSizerHelper(self, sizer=settingsSizer)

@@ -3,9 +3,9 @@ requires = ["setuptools~=80.9", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lima-nvda-addon"
+name = "lima-ai-nvda-addon"
 dynamic = ["version"]
-description = "LIMA NVDA add-on"
+description = "LIMA AI NVDA add-on"
 maintainers = [
 	{name = "Roscommon Systems", email = "hello@roscommonsystems.com"},
 ]

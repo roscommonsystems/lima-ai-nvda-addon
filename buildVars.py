@@ -1,5 +1,5 @@
 # -*- coding: UTF-8 -*-
-# Build customizations for the LIMA NVDA add-on.
+# Build customizations for the LIMA AI NVDA add-on.
 # Change this file instead of sconstruct or manifest files, whenever possible.
 
 from site_scons.site_tools.NVDATool.typings import AddonInfo, BrailleTables, SymbolDictionaries, SpeechDictionaries
@@ -18,18 +18,19 @@ addon_info = AddonInfo(
 	# Add-on summary/title, usually the user visible name of the add-on
 	# Translators: Summary/title for this add-on
 	# to be shown on installation and add-on information found in add-on store
-	addon_summary=_("LIMA"),
+	addon_summary=_("LIMA AI"),
 	# Add-on description
 	# Translators: Long description to be shown for this add-on on add-on information from add-on store
 	addon_description=_(
-		"LIMA (Low-Vision Intelligent Machine Assistant) integration for NVDA. "
-		"Early scaffold: provides a command that confirms the add-on is running."
+		"LIMA AI is the NVDA add-on companion to the LIMA (Low-Vision Intelligent "
+		"Machine Assistant) desktop app. It describes what is on screen on demand: "
+		"press a shortcut and NVDA speaks a brief AI description of the active monitor."
 	),
 	# version
 	addon_version="0.1.0",
 	# Brief changelog for this version
 	# Translators: what's new content for the add-on version to be shown in the add-on store
-	addon_changelog=_("Initial scaffold release."),
+	addon_changelog=_("On-demand AI screen description."),
 	# Author(s)
 	addon_author="Roscommon Systems",
 	# URL for the add-on documentation support

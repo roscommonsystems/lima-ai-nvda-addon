@@ -1,6 +1,6 @@
-# LIMA NVDA Add-on
+# LIMA AI NVDA Add-on
 
-NVDA screen-reader add-on for LIMA (Low-Vision Intelligent Machine Assistant), by Roscommon Systems. A light companion to the LIMA desktop app that brings on-demand AI screen description to NVDA users. Installs into NVDA and is distributed via the NVDA Add-on Store.
+LIMA AI is the NVDA screen-reader add-on for LIMA (Low-Vision Intelligent Machine Assistant), by Roscommon Systems. A light companion to the LIMA desktop app that brings on-demand AI screen description to NVDA users. Installs into NVDA and is distributed via the NVDA Add-on Store.
 
 ## Features
 

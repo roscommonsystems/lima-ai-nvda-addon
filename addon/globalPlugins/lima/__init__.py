@@ -18,10 +18,10 @@ addonHandler.initTranslation()
 
 
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
-	"""Top-level LIMA add-on plugin. Holds the add-on's global commands."""
+	"""Top-level LIMA AI add-on plugin. Holds the add-on's global commands."""
 
 	#: Shown as the command category in NVDA's Input Gestures dialog.
-	scriptCategory = _("LIMA")
+	scriptCategory = _("LIMA AI")
 
 	def __init__(self):
 		super().__init__()
@@ -40,7 +40,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def _error_message(self, code):
 		messages = {
 			# Translators: spoken when no API key has been configured.
-			"no_key": _("Set your OpenRouter API key in LIMA settings."),
+			"no_key": _("Set your OpenRouter API key in LIMA AI settings."),
 			# Translators: spoken when a description is already in progress.
 			"busy": _("Still describing the previous screen, please wait."),
 			# Translators: spoken when the screen could not be captured.
@@ -48,7 +48,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			# Translators: spoken when the AI service cannot be reached.
 			"network": _("Could not reach the AI service. Check your connection and try again."),
 			# Translators: spoken when the AI service returns an error.
-			"api_error": _("The AI service returned an error. Check your API key in LIMA settings."),
+			"api_error": _("The AI service returned an error. Check your API key in LIMA AI settings."),
 			# Translators: spoken when the AI returns no usable description.
 			"empty": _("No description was returned. Try again."),
 		}
@@ -56,12 +56,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	@script(
 		# Translators: Description of the command that confirms the add-on loaded.
-		description=_("Announces that the LIMA add-on is running."),
+		description=_("Announces that the LIMA AI add-on is running."),
 		gesture="kb:NVDA+shift+l",
 	)
 	def script_announceRunning(self, gesture):
 		# Translators: Spoken message confirming the add-on is active.
-		ui.message(_("LIMA add-on is running"))
+		ui.message(_("LIMA AI add-on is running"))
 
 	@script(
 		# Translators: Description of the describe-screen command.
@@ -79,7 +79,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._describing = True
 		if not settings.is_welcome_shown():
 			# Translators: one-time message pointing users to the full desktop product.
-			ui.message(_("Welcome to LIMA for NVDA. For the full hands-free experience, try the LIMA desktop app."))
+			ui.message(_("Welcome to LIMA AI for NVDA. For the full hands-free experience, try the LIMA desktop app."))
 			settings.mark_welcome_shown()
 		# Translators: spoken immediately when a description request starts.
 		ui.message(_("Describing screen."))
