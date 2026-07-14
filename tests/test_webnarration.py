@@ -33,6 +33,11 @@ class FakeVision:
 		return "described"
 
 
+class RaisingVision:
+	def describe_changes(self, before, after, api_key, model):
+		raise RuntimeError("boom")
+
+
 def _make(cap, vis, spoken):
 	return webnarration.WebNarrator(
 		cap, vis, lambda: "key", lambda: "model", lambda t: spoken.append(t), interval=3600
@@ -89,3 +94,33 @@ def test_no_change_does_not_narrate():
 	n._check_once()  # thumbs differ=False -> no narration, no extra full capture
 	assert spoken == []
 	assert vis.calls == []
+
+
+def test_stop_cancels_and_deactivates():
+	n = _make(FakeCapture("x", [], [], False), FakeVision(), [])
+	n.start()
+	assert n.is_active is True
+	assert n._timer is not None
+	n.stop()
+	assert n.is_active is False
+	assert n._timer is None
+
+
+def test_check_once_noop_when_inactive():
+	spoken = []
+	vis = FakeVision()
+	n = _make(FakeCapture("Site - Google Chrome", [b"t"], [b"f"], True), vis, spoken)
+	n._active = False
+	n._check_once()
+	assert spoken == []
+	assert vis.calls == []
+
+
+def test_vision_error_is_swallowed():
+	spoken = []
+	cap = FakeCapture("Site - Google Chrome", [b"t1", b"t2"], [b"full1", b"full2"], True)
+	n = _make(cap, RaisingVision(), spoken)
+	n._active = True
+	n._check_once()  # baseline
+	n._check_once()  # change -> describe_changes raises -> swallowed
+	assert spoken == []

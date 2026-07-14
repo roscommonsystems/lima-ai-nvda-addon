@@ -66,24 +66,24 @@ class WebNarrator:
 	def _check_once(self):
 		if not self._active:
 			return
-		if not self._capture.is_browser_title(self._capture.foreground_window_title()):
-			self._last_thumb = None
-			self._last_full = None
-			return
-		thumb = self._capture.capture_thumbnail_rgb()
-		if self._last_thumb is None:
-			self._last_thumb = thumb
-			self._last_full = self._capture.capture_screen_png()
-			return
-		if not self._capture.frames_differ(self._last_thumb, thumb, self._change_threshold):
-			return
-		after_full = self._capture.capture_screen_png()
-		before_full = self._last_full
-		self._last_thumb = thumb
-		self._last_full = after_full
 		try:
+			if not self._capture.is_browser_title(self._capture.foreground_window_title()):
+				self._last_thumb = None
+				self._last_full = None
+				return
+			thumb = self._capture.capture_thumbnail_rgb()
+			if self._last_thumb is None:
+				self._last_thumb = thumb
+				self._last_full = self._capture.capture_screen_png()
+				return
+			if not self._capture.frames_differ(self._last_thumb, thumb, self._change_threshold):
+				return
+			after_full = self._capture.capture_screen_png()
+			before_full = self._last_full
+			self._last_thumb = thumb
+			self._last_full = after_full
 			text = self._vision.describe_changes(before_full, after_full, self._get_api_key(), self._get_model())
 			if text:
 				self._speak(text)
 		except Exception:
-			pass  # stay silent on errors during continuous narration (vision logs them)
+			pass  # stay silent on any failure during continuous narration
