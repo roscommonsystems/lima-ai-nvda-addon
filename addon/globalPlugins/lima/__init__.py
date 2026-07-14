@@ -131,7 +131,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		gesture="kb:NVDA+shift+w",
 	)
 	def script_toggleWebNarration(self, gesture):
-		if not settings.get_api_key():
+		# Stopping is always allowed; only starting requires an API key.
+		if not self._web_narrator.is_active and not settings.get_api_key():
 			ui.message(self._error_message("no_key"))
 			return
 		active = self._web_narrator.toggle()
