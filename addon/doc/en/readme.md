@@ -10,6 +10,6 @@ LIMA AI is the NVDA add-on companion to the LIMA (Low-Vision Intelligent Machine
 
 ## Setup
 
-Open NVDA menu → Preferences → Settings → **LIMA AI**, and paste your **OpenRouter API key**. You can also change the **model** (default `openai/gpt-4o-mini`).
+Open NVDA menu → Preferences → Settings → **LIMA AI**, and paste your **OpenRouter API key**. The model is fixed to the one the LIMA desktop app uses, so you do not need to choose it.
 
 This add-on only describes the screen on demand. For the full hands-free experience, including continuous narration and voice-driven computer control, use the **LIMA desktop app**.
