@@ -104,3 +104,29 @@ def test_describe_image_threads_max_tokens_into_request():
 
 	vision.describe_image(b"img", "key", "m", max_tokens=77, _opener=opener)
 	assert captured["body"]["max_tokens"] == 77
+
+
+def test_build_changes_payload_has_two_images_and_max_tokens():
+	payload = vision.build_changes_payload(b"BEFORE", b"AFTER", "some/model")
+	assert payload["max_tokens"] == 150
+	content = payload["messages"][0]["content"]
+	images = [c for c in content if c.get("type") == "image_url"]
+	assert len(images) == 2
+	import base64
+	assert base64.b64decode(images[0]["image_url"]["url"].split(",", 1)[1]) == b"BEFORE"
+	assert base64.b64decode(images[1]["image_url"]["url"].split(",", 1)[1]) == b"AFTER"
+
+
+def test_describe_changes_success_returns_text():
+	import json
+	raw = json.dumps({"choices": [{"message": {"content": "A menu opened."}}]}).encode("utf-8")
+	text = vision.describe_changes(b"a", b"b", "key", "m", _opener=_fake_opener(raw_bytes=raw))
+	assert text == "A menu opened."
+
+
+def test_describe_changes_network_failure_raises_network_code():
+	import urllib.error
+	opener = _fake_opener(raise_exc=urllib.error.URLError("down"))
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_changes(b"a", b"b", "key", "m", _opener=opener)
+	assert exc.value.code == "network"
