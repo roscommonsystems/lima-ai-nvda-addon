@@ -11,7 +11,9 @@ import addonHandler
 addonHandler.initTranslation()
 
 CONFIG_SECTION = "lima"
-DEFAULT_MODEL = "openai/gpt-4o-mini"
+# Matches the model the LIMA desktop app uses for its describe-image tool.
+# Managed like desktop: fixed here, not exposed for the user to edit.
+DEFAULT_MODEL = "meta-llama/llama-4-maverick"
 
 CONFIG_SPEC = {
 	"apiKey": 'string(default="")',
@@ -50,11 +52,6 @@ class LimaSettingsPanel(SettingsPanel):
 		# Translators: Label for the OpenRouter API key field.
 		self.apiKeyEdit = helper.addLabeledControl(_("OpenRouter API &key:"), wx.TextCtrl)
 		self.apiKeyEdit.SetValue(get_api_key())
-		# Translators: Label for the model identifier field.
-		self.modelEdit = helper.addLabeledControl(_("&Model:"), wx.TextCtrl)
-		self.modelEdit.SetValue(get_model())
 
 	def onSave(self):
 		config.conf[CONFIG_SECTION]["apiKey"] = self.apiKeyEdit.GetValue().strip()
-		model = self.modelEdit.GetValue().strip()
-		config.conf[CONFIG_SECTION]["model"] = model or DEFAULT_MODEL

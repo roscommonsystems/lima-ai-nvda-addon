@@ -27,10 +27,10 @@ addon_info = AddonInfo(
 		"press a shortcut and NVDA speaks a brief AI description of the active monitor."
 	),
 	# version
-	addon_version="0.1.0",
+	addon_version="0.2.0",
 	# Brief changelog for this version
 	# Translators: what's new content for the add-on version to be shown in the add-on store
-	addon_changelog=_("On-demand AI screen description."),
+	addon_changelog=_("Describe the screen using the LIMA desktop model."),
 	# Author(s)
 	addon_author="Roscommon Systems",
 	# URL for the add-on documentation support
