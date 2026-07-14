@@ -17,6 +17,8 @@ CONFIG_SPEC = {
 	"apiKey": 'string(default="")',
 	"model": 'string(default="%s")' % DEFAULT_MODEL,
 	"welcomeShown": "boolean(default=false)",
+	"webNarrationIntervalSeconds": "float(default=6.0)",
+	"webNarrationChangeThreshold": "float(default=0.03)",
 }
 
 
@@ -31,6 +33,14 @@ def get_api_key():
 
 def get_model():
 	return config.conf[CONFIG_SECTION]["model"]
+
+
+def get_web_narration_interval():
+	return config.conf[CONFIG_SECTION]["webNarrationIntervalSeconds"]
+
+
+def get_web_narration_threshold():
+	return config.conf[CONFIG_SECTION]["webNarrationChangeThreshold"]
 
 
 def is_welcome_shown():
