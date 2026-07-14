@@ -19,6 +19,12 @@ DEFAULT_PROMPT = (
 
 MAX_TOKENS = 150
 
+CHANGES_PROMPT = (
+	"You are assisting a blind user browsing the web. Two screenshots are given, "
+	"before and after. In one or two short factual sentences, describe what changed "
+	"on the page. Ignore changes likely made by the user (typing, moving the mouse, scrolling)."
+)
+
 
 class VisionError(Exception):
 	"""A failure with a stable code the caller maps to a spoken message.
@@ -63,14 +69,11 @@ def parse_response(body):
 	return text.strip()
 
 
-def describe_image(image_png_bytes, api_key, model, prompt=DEFAULT_PROMPT, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
-	"""POST the image to OpenRouter; return the description text.
+def _post_and_parse(payload, api_key, timeout, _opener):
+	"""POST an OpenRouter payload and return the parsed description text.
 
-	Raises VisionError on any failure. `_opener` is injectable for tests.
-	The real underlying error is logged (it surfaces in NVDA's log) while the
-	caller still gets a stable, speakable code.
+	Raises VisionError (speakable code) on any failure; logs the real error.
 	"""
-	payload = build_payload(image_png_bytes, model, prompt, max_tokens)
 	data = json.dumps(payload).encode("utf-8")
 	request = urllib.request.Request(
 		OPENROUTER_URL,
@@ -93,14 +96,46 @@ def describe_image(image_png_bytes, api_key, model, prompt=DEFAULT_PROMPT, max_t
 			detail = e.read().decode("utf-8", "replace")[:500]
 		except Exception:
 			pass
-		log.error("LIMA vision HTTP error %s: %s", getattr(e, "code", "?"), detail)
+		log.error("LIMA AI vision HTTP error %s: %s", getattr(e, "code", "?"), detail)
 		raise VisionError("api_error") from e
 	except (urllib.error.URLError, TimeoutError, OSError) as e:
-		log.error("LIMA vision could not reach the AI service: %r", e)
+		log.error("LIMA AI vision could not reach the AI service: %r", e)
 		raise VisionError("network") from e
 	try:
 		body = json.loads(raw.decode("utf-8"))
 	except ValueError as e:
-		log.error("LIMA vision received a non-JSON response: %r", e)
+		log.error("LIMA AI vision received a non-JSON response: %r", e)
 		raise VisionError("empty") from e
 	return parse_response(body)
+
+
+def describe_image(image_png_bytes, api_key, model, prompt=DEFAULT_PROMPT, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
+	"""POST one screenshot to OpenRouter; return the description text."""
+	payload = build_payload(image_png_bytes, model, prompt, max_tokens)
+	return _post_and_parse(payload, api_key, timeout, _opener)
+
+
+def build_changes_payload(before_png, after_png, model, prompt=CHANGES_PROMPT, max_tokens=MAX_TOKENS):
+	"""OpenAI-format body carrying two PNG images (before, after)."""
+	before_url = "data:image/png;base64," + base64.b64encode(before_png).decode("ascii")
+	after_url = "data:image/png;base64," + base64.b64encode(after_png).decode("ascii")
+	return {
+		"model": model,
+		"max_tokens": max_tokens,
+		"messages": [
+			{
+				"role": "user",
+				"content": [
+					{"type": "text", "text": prompt},
+					{"type": "image_url", "image_url": {"url": before_url}},
+					{"type": "image_url", "image_url": {"url": after_url}},
+				],
+			}
+		],
+	}
+
+
+def describe_changes(before_png, after_png, api_key, model, prompt=CHANGES_PROMPT, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
+	"""POST before/after screenshots; return a description of what changed."""
+	payload = build_changes_payload(before_png, after_png, model, prompt, max_tokens)
+	return _post_and_parse(payload, api_key, timeout, _opener)

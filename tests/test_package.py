@@ -19,7 +19,7 @@ def test_addon_contains_expected_files():
     with zipfile.ZipFile(path) as zf:
         names = set(zf.namelist())
     assert "manifest.ini" in names
-    for module in ("__init__.py", "vision.py", "capture.py", "settings.py"):
+    for module in ("__init__.py", "vision.py", "capture.py", "settings.py", "webnarration.py"):
         assert "globalPlugins/lima/" + module in names
 
 

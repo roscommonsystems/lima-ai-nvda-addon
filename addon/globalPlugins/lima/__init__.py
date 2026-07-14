@@ -7,12 +7,15 @@ import globalPluginHandler
 import ui
 import gui
 import queueHandler
+import speech
+from speech.priorities import Spri
 import addonHandler
 from scriptHandler import script
 
 from . import capture
 from . import vision
 from . import settings
+from . import webnarration
 
 addonHandler.initTranslation()
 
@@ -28,8 +31,18 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		settings.initialize()
 		gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(settings.LimaSettingsPanel)
 		self._describing = False
+		self._web_narrator = webnarration.WebNarrator(
+			capture,
+			vision,
+			settings.get_api_key,
+			settings.get_model,
+			self._speak_queued,
+			interval=settings.get_web_narration_interval(),
+			change_threshold=settings.get_web_narration_threshold(),
+		)
 
 	def terminate(self):
+		self._web_narrator.stop()
 		try:
 			gui.settingsDialogs.NVDASettingsDialog.categoryClasses.remove(settings.LimaSettingsPanel)
 		except ValueError:
@@ -107,3 +120,21 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			self._describing = False
 		# NVDA speech must run on the main thread.
 		queueHandler.queueFunction(queueHandler.eventQueue, ui.message, message)
+
+	def _speak_queued(self, text):
+		# Queued at NEXT priority so it never interrupts what NVDA is reading.
+		queueHandler.queueFunction(queueHandler.eventQueue, speech.speakMessage, text, Spri.NEXT)
+
+	@script(
+		# Translators: Description of the command that toggles web narration.
+		description=_("Toggle dynamic web narration on or off."),
+		gesture="kb:NVDA+shift+w",
+	)
+	def script_toggleWebNarration(self, gesture):
+		# Stopping is always allowed; only starting requires an API key.
+		if not self._web_narrator.is_active and not settings.get_api_key():
+			ui.message(self._error_message("no_key"))
+			return
+		active = self._web_narrator.toggle()
+		# Translators: spoken when web narration is turned on or off.
+		ui.message(_("Web narration on") if active else _("Web narration off"))
