@@ -28,19 +28,19 @@ class FakeVision:
 	def __init__(self):
 		self.calls = []
 
-	def describe_changes(self, before, after, api_key, model):
-		self.calls.append((before, after, api_key, model))
+	def describe_changes(self, before, after, api_key):
+		self.calls.append((before, after, api_key))
 		return "described"
 
 
 class RaisingVision:
-	def describe_changes(self, before, after, api_key, model):
+	def describe_changes(self, before, after, api_key):
 		raise RuntimeError("boom")
 
 
 def _make(cap, vis, spoken):
 	return webnarration.WebNarrator(
-		cap, vis, lambda: "key", lambda: "model", lambda t: spoken.append(t), interval=3600
+		cap, vis, lambda: "key", lambda t: spoken.append(t), interval=3600
 	)
 
 
@@ -81,7 +81,7 @@ def test_change_triggers_narration_with_before_and_after():
 	n._check_once()  # baseline: full1
 	n._check_once()  # change: before=full1, after=full2
 	assert spoken == ["described"]
-	assert vis.calls == [(b"full1", b"full2", "key", "model")]
+	assert vis.calls == [(b"full1", b"full2", "key")]
 
 
 def test_no_change_does_not_narrate():
