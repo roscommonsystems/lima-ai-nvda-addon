@@ -17,12 +17,9 @@ from . import firebase_config
 addonHandler.initTranslation()
 
 CONFIG_SECTION = "lima"
-# Matches the model the LIMA desktop app uses for its describe-image tool.
-DEFAULT_MODEL = "meta-llama/llama-4-maverick"
 
 CONFIG_SPEC = {
 	"apiKey": 'string(default="")',
-	"model": 'string(default="%s")' % DEFAULT_MODEL,
 	"welcomeShown": "boolean(default=false)",
 	"webNarrationIntervalSeconds": "float(default=6.0)",
 	"webNarrationChangeThreshold": "float(default=0.03)",
@@ -40,10 +37,6 @@ def initialize():
 
 def get_api_key():
 	return config.conf[CONFIG_SECTION]["apiKey"]
-
-
-def get_model():
-	return config.conf[CONFIG_SECTION]["model"]
 
 
 def get_web_narration_interval():
@@ -118,9 +111,6 @@ class LimaSettingsPanel(SettingsPanel):
 		# Translators: Label for the OpenRouter API key field.
 		self.apiKeyEdit = helper.addLabeledControl(_("OpenRouter API &key:"), wx.TextCtrl)
 		self.apiKeyEdit.SetValue(get_api_key())
-		# Translators: Label for the model identifier field.
-		self.modelEdit = helper.addLabeledControl(_("&Model:"), wx.TextCtrl)
-		self.modelEdit.SetValue(get_model())
 
 		# Translators: label of the Google account group in LIMA AI settings.
 		accountSizer = wx.StaticBoxSizer(wx.StaticBox(self, label=_("Google account")), wx.VERTICAL)
@@ -193,5 +183,3 @@ class LimaSettingsPanel(SettingsPanel):
 
 	def onSave(self):
 		config.conf[CONFIG_SECTION]["apiKey"] = self.apiKeyEdit.GetValue().strip()
-		model = self.modelEdit.GetValue().strip()
-		config.conf[CONFIG_SECTION]["model"] = model or DEFAULT_MODEL
