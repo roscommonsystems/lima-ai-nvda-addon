@@ -12,6 +12,9 @@ manifest-translated.ini
 addon/doc/**/*.html
 addon/doc/style.css
 
+# Secrets — never commit (Firebase / Google OAuth values)
+addon/globalPlugins/lima/secret_config.py
+
 # Python
 __pycache__/
 *.py[cod]
