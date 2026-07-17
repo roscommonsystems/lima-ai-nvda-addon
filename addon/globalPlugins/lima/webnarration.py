@@ -25,6 +25,7 @@ class WebNarrator:
 		self._timer = None
 		self._last_thumb = None
 		self._last_full = None
+		self._last_description = None
 
 	@property
 	def is_active(self):
@@ -41,6 +42,7 @@ class WebNarrator:
 		self._active = True
 		self._last_thumb = None
 		self._last_full = None
+		self._last_description = None
 		self._schedule()
 
 	def stop(self):
@@ -69,6 +71,7 @@ class WebNarrator:
 			if not self._capture.is_browser_title(self._capture.foreground_window_title()):
 				self._last_thumb = None
 				self._last_full = None
+				self._last_description = None
 				return
 			thumb = self._capture.capture_thumbnail_rgb()
 			if self._last_thumb is None:
@@ -81,8 +84,9 @@ class WebNarrator:
 			before_full = self._last_full
 			self._last_thumb = thumb
 			self._last_full = after_full
-			text = self._vision.describe_changes(before_full, after_full, self._get_api_key())
-			if text:
+			text = self._vision.describe_changes(before_full, after_full, self._get_api_key(), previous=self._last_description)
+			if text and text != self._vision.NO_CHANGE and text != self._last_description:
+				self._last_description = text
 				self._speak(text)
 		except Exception:
 			pass  # stay silent on any failure during continuous narration

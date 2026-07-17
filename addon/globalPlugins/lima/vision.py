@@ -25,6 +25,22 @@ CHANGES_PROMPT = (
 	"on the page. Ignore changes likely made by the user (typing, moving the mouse, scrolling)."
 )
 
+# Sentinel the model returns when nothing meaningful is new; the caller skips speaking it.
+NO_CHANGE = "NO_CHANGE"
+
+
+def changes_prompt(previous=None):
+	"""Prompt for a change description. When `previous` (the last thing narrated)
+	is given, ask the model to describe only what is NEW, or reply with NO_CHANGE."""
+	if not previous:
+		return CHANGES_PROMPT
+	return (
+		CHANGES_PROMPT
+		+ ' You have already told the user: "%s".' % previous
+		+ " Describe only what is new since then, in one short sentence."
+		+ " If nothing meaningful is new, reply with exactly %s." % NO_CHANGE
+	)
+
 OPENROUTER_VISION_MODEL = "google/gemma-4-31b-it"
 
 # Vetted, trusted ZDR-supporting providers, in priority order (Weights & Biases first).
@@ -153,7 +169,11 @@ def build_changes_payload(before_png, after_png, model=OPENROUTER_VISION_MODEL, 
 	}
 
 
-def describe_changes(before_png, after_png, api_key, model=OPENROUTER_VISION_MODEL, prompt=CHANGES_PROMPT, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
-	"""POST before/after screenshots; return a description of what changed."""
-	payload = build_changes_payload(before_png, after_png, model, prompt, max_tokens)
+def describe_changes(before_png, after_png, api_key, model=OPENROUTER_VISION_MODEL, previous=None, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
+	"""POST before/after screenshots; return a description of what changed.
+
+	If `previous` (the last thing narrated) is given, the model is asked to
+	describe only what is new since then, or to reply with NO_CHANGE.
+	"""
+	payload = build_changes_payload(before_png, after_png, model, changes_prompt(previous), max_tokens)
 	return _post_and_parse(payload, api_key, timeout, _opener)

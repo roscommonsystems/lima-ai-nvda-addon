@@ -25,16 +25,23 @@ class FakeCapture:
 
 
 class FakeVision:
-	def __init__(self):
-		self.calls = []
+	NO_CHANGE = "NO_CHANGE"
 
-	def describe_changes(self, before, after, api_key):
-		self.calls.append((before, after, api_key))
+	def __init__(self, replies=None):
+		self.calls = []
+		self._replies = list(replies) if replies else None
+
+	def describe_changes(self, before, after, api_key, previous=None):
+		self.calls.append((before, after, api_key, previous))
+		if self._replies:
+			return self._replies.pop(0)
 		return "described"
 
 
 class RaisingVision:
-	def describe_changes(self, before, after, api_key):
+	NO_CHANGE = "NO_CHANGE"
+
+	def describe_changes(self, before, after, api_key, previous=None):
 		raise RuntimeError("boom")
 
 
@@ -81,7 +88,7 @@ def test_change_triggers_narration_with_before_and_after():
 	n._check_once()  # baseline: full1
 	n._check_once()  # change: before=full1, after=full2
 	assert spoken == ["described"]
-	assert vis.calls == [(b"full1", b"full2", "key")]
+	assert vis.calls == [(b"full1", b"full2", "key", None)]
 
 
 def test_no_change_does_not_narrate():
@@ -124,3 +131,40 @@ def test_vision_error_is_swallowed():
 	n._check_once()  # baseline
 	n._check_once()  # change -> describe_changes raises -> swallowed
 	assert spoken == []
+
+
+def test_skips_speaking_when_model_returns_no_change():
+	spoken = []
+	vis = FakeVision(replies=["NO_CHANGE"])
+	cap = FakeCapture("Site - Google Chrome", [b"t1", b"t2"], [b"f1", b"f2"], True)
+	n = _make(cap, vis, spoken)
+	n._active = True
+	n._check_once()  # baseline
+	n._check_once()  # change -> model says NO_CHANGE -> not spoken
+	assert spoken == []
+
+
+def test_skips_exact_duplicate_description():
+	spoken = []
+	vis = FakeVision(replies=["A menu opened.", "A menu opened."])
+	cap = FakeCapture("Site - Google Chrome", [b"t1", b"t2", b"t3"], [b"f1", b"f2", b"f3"], True)
+	n = _make(cap, vis, spoken)
+	n._active = True
+	n._check_once()  # baseline
+	n._check_once()  # change -> spoken once
+	n._check_once()  # change -> same text -> skipped
+	assert spoken == ["A menu opened."]
+
+
+def test_passes_last_description_as_previous():
+	spoken = []
+	vis = FakeVision(replies=["A video is playing.", "The video stopped."])
+	cap = FakeCapture("Site - Google Chrome", [b"t1", b"t2", b"t3"], [b"f1", b"f2", b"f3"], True)
+	n = _make(cap, vis, spoken)
+	n._active = True
+	n._check_once()  # baseline
+	n._check_once()  # first change -> previous should be None
+	n._check_once()  # second change -> previous should be the last spoken line
+	assert vis.calls[0][3] is None
+	assert vis.calls[1][3] == "A video is playing."
+	assert spoken == ["A video is playing.", "The video stopped."]
