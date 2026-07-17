@@ -27,13 +27,15 @@ CHANGES_PROMPT = (
 
 OPENROUTER_VISION_MODEL = "google/gemma-4-31b-it"
 
+# Vetted, trusted ZDR-supporting providers, in priority order (Weights & Biases first).
+_ZDR_PROVIDERS = ["Weights & Biases", "Cerebras", "Novita"]
+
 # ZDR is mandatory (screenshots are sensitive): only route to Zero-Data-Retention
 # endpoints. These MUST live inside the "provider" object; OpenRouter silently
-# ignores a top-level zdr flag. Providers are restricted to a vetted, trusted set,
-# prioritised with Weights & Biases first.
+# ignores a top-level zdr flag.
 VISION_PROVIDER = {
-	"order": ["Weights & Biases", "Cerebras", "Novita"],
-	"only": ["Weights & Biases", "Cerebras", "Novita"],
+	"order": _ZDR_PROVIDERS,
+	"only": _ZDR_PROVIDERS,
 	"zdr": True,
 	"data_collection": "deny",
 	"allow_fallbacks": True,
