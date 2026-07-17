@@ -37,7 +37,8 @@ def changes_prompt(previous=None):
 	return (
 		CHANGES_PROMPT
 		+ ' You have already told the user: "%s".' % previous
-		+ " Describe only what is new since then, in one short sentence."
+		+ " Describe only what is new since then, in one or two clear sentences that keep"
+		+ " the useful detail of what is happening. Do not repeat what you already said."
 		+ " If nothing meaningful is new, reply with exactly %s." % NO_CHANGE
 	)
 
