@@ -25,6 +25,22 @@ CHANGES_PROMPT = (
 	"on the page. Ignore changes likely made by the user (typing, moving the mouse, scrolling)."
 )
 
+OPENROUTER_VISION_MODEL = "google/gemma-4-31b-it"
+
+# Vetted, trusted ZDR-supporting providers, in priority order (Weights & Biases first).
+_ZDR_PROVIDERS = ["Weights & Biases", "Cerebras", "Novita"]
+
+# ZDR is mandatory (screenshots are sensitive): only route to Zero-Data-Retention
+# endpoints. These MUST live inside the "provider" object; OpenRouter silently
+# ignores a top-level zdr flag.
+VISION_PROVIDER = {
+	"order": _ZDR_PROVIDERS,
+	"only": _ZDR_PROVIDERS,
+	"zdr": True,
+	"data_collection": "deny",
+	"allow_fallbacks": True,
+}
+
 
 class VisionError(Exception):
 	"""A failure with a stable code the caller maps to a spoken message.
@@ -37,13 +53,14 @@ class VisionError(Exception):
 		self.code = code
 
 
-def build_payload(image_png_bytes, model, prompt=DEFAULT_PROMPT, max_tokens=MAX_TOKENS):
+def build_payload(image_png_bytes, model=OPENROUTER_VISION_MODEL, prompt=DEFAULT_PROMPT, max_tokens=MAX_TOKENS):
 	"""Build an OpenAI-format chat-completions body carrying one PNG image."""
 	b64 = base64.b64encode(image_png_bytes).decode("ascii")
 	data_url = "data:image/png;base64," + b64
 	return {
 		"model": model,
 		"max_tokens": max_tokens,
+		"provider": VISION_PROVIDER,
 		"messages": [
 			{
 				"role": "user",
@@ -109,19 +126,20 @@ def _post_and_parse(payload, api_key, timeout, _opener):
 	return parse_response(body)
 
 
-def describe_image(image_png_bytes, api_key, model, prompt=DEFAULT_PROMPT, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
+def describe_image(image_png_bytes, api_key, model=OPENROUTER_VISION_MODEL, prompt=DEFAULT_PROMPT, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
 	"""POST one screenshot to OpenRouter; return the description text."""
 	payload = build_payload(image_png_bytes, model, prompt, max_tokens)
 	return _post_and_parse(payload, api_key, timeout, _opener)
 
 
-def build_changes_payload(before_png, after_png, model, prompt=CHANGES_PROMPT, max_tokens=MAX_TOKENS):
+def build_changes_payload(before_png, after_png, model=OPENROUTER_VISION_MODEL, prompt=CHANGES_PROMPT, max_tokens=MAX_TOKENS):
 	"""OpenAI-format body carrying two PNG images (before, after)."""
 	before_url = "data:image/png;base64," + base64.b64encode(before_png).decode("ascii")
 	after_url = "data:image/png;base64," + base64.b64encode(after_png).decode("ascii")
 	return {
 		"model": model,
 		"max_tokens": max_tokens,
+		"provider": VISION_PROVIDER,
 		"messages": [
 			{
 				"role": "user",
@@ -135,7 +153,7 @@ def build_changes_payload(before_png, after_png, model, prompt=CHANGES_PROMPT, m
 	}
 
 
-def describe_changes(before_png, after_png, api_key, model, prompt=CHANGES_PROMPT, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
+def describe_changes(before_png, after_png, api_key, model=OPENROUTER_VISION_MODEL, prompt=CHANGES_PROMPT, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
 	"""POST before/after screenshots; return a description of what changed."""
 	payload = build_changes_payload(before_png, after_png, model, prompt, max_tokens)
 	return _post_and_parse(payload, api_key, timeout, _opener)

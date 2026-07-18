@@ -14,11 +14,10 @@ class WebNarrator:
 	avoided because ticks are sequential.
 	"""
 
-	def __init__(self, capture, vision, get_api_key, get_model, speak, interval=6.0, change_threshold=0.03):
+	def __init__(self, capture, vision, get_api_key, speak, interval=6.0, change_threshold=0.03):
 		self._capture = capture
 		self._vision = vision
 		self._get_api_key = get_api_key
-		self._get_model = get_model
 		self._speak = speak
 		self._interval = interval
 		self._change_threshold = change_threshold
@@ -82,7 +81,7 @@ class WebNarrator:
 			before_full = self._last_full
 			self._last_thumb = thumb
 			self._last_full = after_full
-			text = self._vision.describe_changes(before_full, after_full, self._get_api_key(), self._get_model())
+			text = self._vision.describe_changes(before_full, after_full, self._get_api_key())
 			if text:
 				self._speak(text)
 		except Exception:

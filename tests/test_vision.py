@@ -130,3 +130,26 @@ def test_describe_changes_network_failure_raises_network_code():
 	with pytest.raises(vision.VisionError) as exc:
 		vision.describe_changes(b"a", b"b", "key", "m", _opener=opener)
 	assert exc.value.code == "network"
+
+
+def test_build_payload_includes_zdr_provider_inside_provider_object():
+	payload = vision.build_payload(b"img")
+	assert payload["provider"] == vision.VISION_PROVIDER
+	assert payload["provider"]["zdr"] is True
+	assert payload["provider"]["data_collection"] == "deny"
+	assert payload["provider"]["allow_fallbacks"] is True
+	assert payload["provider"]["order"] == ["Weights & Biases", "Cerebras", "Novita"]
+	# ZDR must NOT be top-level (OpenRouter ignores it there).
+	assert "zdr" not in payload
+
+
+def test_build_changes_payload_includes_zdr_provider():
+	payload = vision.build_changes_payload(b"a", b"b")
+	assert payload["provider"] == vision.VISION_PROVIDER
+	assert "zdr" not in payload
+
+
+def test_payload_builders_default_to_gemma_model():
+	assert vision.build_payload(b"img")["model"] == "google/gemma-4-31b-it"
+	assert vision.build_changes_payload(b"a", b"b")["model"] == "google/gemma-4-31b-it"
+	assert vision.OPENROUTER_VISION_MODEL == "google/gemma-4-31b-it"

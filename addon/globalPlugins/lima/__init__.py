@@ -35,7 +35,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			capture,
 			vision,
 			settings.get_api_key,
-			settings.get_model,
 			self._speak_queued,
 			interval=settings.get_web_narration_interval(),
 			change_threshold=settings.get_web_narration_threshold(),
@@ -102,16 +101,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			self._describing = False
 			ui.message(self._error_message("capture"))
 			return
-		model = settings.get_model()
 		thread = threading.Thread(
-			target=self._run_describe, args=(png, api_key, model), daemon=True
+			target=self._run_describe, args=(png, api_key), daemon=True
 		)
 		thread.start()
 
-	def _run_describe(self, png, api_key, model):
+	def _run_describe(self, png, api_key):
 		message = self._error_message("api_error")
 		try:
-			message = vision.describe_image(png, api_key, model)
+			message = vision.describe_image(png, api_key)
 		except vision.VisionError as e:
 			message = self._error_message(e.code)
 		except Exception:
