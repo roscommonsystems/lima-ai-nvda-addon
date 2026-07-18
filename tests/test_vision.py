@@ -153,3 +153,33 @@ def test_payload_builders_default_to_gemma_model():
 	assert vision.build_payload(b"img")["model"] == "google/gemma-4-31b-it"
 	assert vision.build_changes_payload(b"a", b"b")["model"] == "google/gemma-4-31b-it"
 	assert vision.OPENROUTER_VISION_MODEL == "google/gemma-4-31b-it"
+
+
+def test_changes_prompt_without_previous_is_the_base_prompt():
+	assert vision.changes_prompt() == vision.CHANGES_PROMPT
+	assert vision.changes_prompt(None) == vision.CHANGES_PROMPT
+
+
+def test_changes_prompt_with_previous_asks_for_only_new():
+	p = vision.changes_prompt("A video is playing.")
+	assert "A video is playing." in p
+	assert vision.NO_CHANGE in p
+	assert "new" in p.lower()
+
+
+def test_describe_changes_threads_previous_into_the_prompt():
+	captured = {}
+
+	@contextmanager
+	def opener(request, timeout=None):
+		captured["body"] = json.loads(request.data.decode("utf-8"))
+
+		class _Resp:
+			def read(self_inner):
+				return json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode("utf-8")
+
+		yield _Resp()
+
+	vision.describe_changes(b"a", b"b", "key", previous="A menu was open.", _opener=opener)
+	text = captured["body"]["messages"][0]["content"][0]["text"]
+	assert "A menu was open." in text and vision.NO_CHANGE in text
