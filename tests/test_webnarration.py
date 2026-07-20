@@ -168,3 +168,16 @@ def test_passes_last_description_as_previous():
 	assert vis.calls[0][3] is None
 	assert vis.calls[1][3] == "A video is playing."
 	assert spoken == ["A video is playing.", "The video stopped."]
+
+
+def test_narration_prefix_is_prepended_when_speaking():
+	spoken = []
+	vis = FakeVision(replies=["a video started"])
+	cap = FakeCapture("Site - Google Chrome", [b"t1", b"t2"], [b"f1", b"f2"], True)
+	n = webnarration.WebNarrator(
+		cap, vis, lambda: "key", lambda t: spoken.append(t), interval=3600, narration_prefix="[upd] "
+	)
+	n._active = True
+	n._check_once()  # baseline
+	n._check_once()  # change -> spoken WITH the prefix
+	assert spoken == ["[upd] a video started"]

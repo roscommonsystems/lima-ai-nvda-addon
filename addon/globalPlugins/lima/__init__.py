@@ -38,6 +38,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			self._speak_queued,
 			interval=settings.get_web_narration_interval(),
 			change_threshold=settings.get_web_narration_threshold(),
+			# Translators: spoken before each dynamic web-narration update.
+			narration_prefix=_("Web page update:") + " ",
 		)
 
 	def terminate(self):
