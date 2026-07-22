@@ -38,10 +38,13 @@ OAUTH_SCOPES = ["openid", "email", "profile"]
 
 #: Project constants needed to run the flow. Values come from firebase_config.py.
 #: database_id is "(default)" unless the project uses a named Firestore database.
+#: users_collection isolates dev from prod (users_dev vs users) and MUST match the
+#: auth server's USERS_COLLECTION so the profile and the OpenRouter fields land in the
+#: same user document.
 FirebaseConfig = collections.namedtuple(
 	"FirebaseConfig",
-	["client_id", "client_secret", "api_key", "project_id", "database_id"],
-	defaults=["(default)"],
+	["client_id", "client_secret", "api_key", "project_id", "database_id", "users_collection"],
+	defaults=["(default)", "users"],
 )
 
 
@@ -195,10 +198,10 @@ def _now_rfc3339():
 	return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def get_user_document(project_id, uid, id_token, database_id="(default)", timeout=30, _opener=None):
-	"""Return the users/{uid} document, or None if it does not exist yet."""
-	url = "%s/projects/%s/databases/%s/documents/users/%s" % (
-		FIRESTORE_BASE, project_id, database_id, urllib.parse.quote(uid),
+def get_user_document(project_id, uid, id_token, database_id="(default)", collection="users", timeout=30, _opener=None):
+	"""Return the {collection}/{uid} document, or None if it does not exist yet."""
+	url = "%s/projects/%s/databases/%s/documents/%s/%s" % (
+		FIRESTORE_BASE, project_id, database_id, collection, urllib.parse.quote(uid),
 	)
 	request = urllib.request.Request(
 		url, headers={"Authorization": "Bearer " + id_token}, method="GET"
@@ -209,7 +212,7 @@ def get_user_document(project_id, uid, id_token, database_id="(default)", timeou
 	return _parse_json(raw)
 
 
-def save_user_login(project_id, uid, id_token, email, display_name, include_created=False, database_id="(default)", ip_address="", system_language="", user_agent="", country="", now=None, timeout=30, _opener=None):
+def save_user_login(project_id, uid, id_token, email, display_name, include_created=False, database_id="(default)", collection="users", ip_address="", system_language="", user_agent="", country="", now=None, timeout=30, _opener=None):
 	"""Upsert the flat profile fields on users/{uid}, touching only what we set.
 
 	An updateMask lists exactly the fields written, so any other fields on the
@@ -234,8 +237,8 @@ def save_user_login(project_id, uid, id_token, email, display_name, include_crea
 			mask.append(name)
 
 	query = "&".join("updateMask.fieldPaths=" + p for p in mask)
-	url = "%s/projects/%s/databases/%s/documents/users/%s?%s" % (
-		FIRESTORE_BASE, project_id, database_id, urllib.parse.quote(uid), query,
+	url = "%s/projects/%s/databases/%s/documents/%s/%s?%s" % (
+		FIRESTORE_BASE, project_id, database_id, collection, urllib.parse.quote(uid), query,
 	)
 	data = json.dumps({"fields": fields}).encode("utf-8")
 	request = urllib.request.Request(
@@ -250,7 +253,7 @@ def save_user_login(project_id, uid, id_token, email, display_name, include_crea
 def _store_user(config, session, _opener=None):
 	existing = get_user_document(
 		config.project_id, session["uid"], session["idToken"],
-		database_id=config.database_id, _opener=_opener,
+		database_id=config.database_id, collection=config.users_collection, _opener=_opener,
 	)
 	has_created = bool(existing and "createdAt" in existing.get("fields", {}))
 	save_user_login(
@@ -261,6 +264,7 @@ def _store_user(config, session, _opener=None):
 		session["displayName"],
 		include_created=not has_created,
 		database_id=config.database_id,
+		collection=config.users_collection,
 		ip_address=session.get("ipAddress", ""),
 		system_language=session.get("systemLanguage", ""),
 		user_agent=session.get("userAgent", ""),
