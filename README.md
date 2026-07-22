@@ -6,6 +6,7 @@ LIMA AI is the NVDA screen-reader add-on for LIMA (Low-Vision Intelligent Machin
 
 - **NVDA+Shift+D** — Describe the current screen. Captures the active monitor, sends it to a vision AI, and NVDA speaks a brief factual description.
 - **NVDA+Shift+L** — Announce that the add-on is running (health check).
+- **NVDA+Shift+W** — Toggle dynamic web narration. While on and a browser is focused, NVDA briefly describes changes on the page without interrupting what you're reading.
 
 The description is deliberately a short, on-demand snapshot. Continuous narration and computer control remain exclusive to the LIMA desktop app.
 
