@@ -2,6 +2,7 @@
 # LIMA NVDA add-on: configuration spec and settings panel.
 
 import threading
+import time
 
 import config
 import wx
@@ -19,7 +20,6 @@ addonHandler.initTranslation()
 CONFIG_SECTION = "lima"
 
 CONFIG_SPEC = {
-	"apiKey": 'string(default="")',
 	"welcomeShown": "boolean(default=false)",
 	"webNarrationIntervalSeconds": "float(default=6.0)",
 	"webNarrationChangeThreshold": "float(default=0.03)",
@@ -35,8 +35,44 @@ def initialize():
 	config.conf.spec[CONFIG_SECTION] = CONFIG_SPEC
 
 
-def get_api_key():
-	return config.conf[CONFIG_SECTION]["apiKey"]
+# --- Firebase ID token provider ----------------------------------------------
+# AI calls are proxied through the LIMA backend and authenticated with the user's
+# Firebase ID token. Tokens last ~1 hour, so cache one in memory and refresh it from
+# the stored refresh token when it expires. Guarded by a lock because describe/narration
+# calls run on background threads.
+
+_token_lock = threading.Lock()
+_cached_id_token = ""
+_cached_expiry = 0.0
+
+
+def get_id_token():
+	"""Return a valid Firebase ID token, refreshing when expired. "" if signed out."""
+	global _cached_id_token, _cached_expiry
+	with _token_lock:
+		if _cached_id_token and time.time() < _cached_expiry:
+			return _cached_id_token
+		refresh_token = get_refresh_token()
+		if not refresh_token:
+			return ""
+		try:
+			session = auth.restore_session(firebase_config.get_config(), refresh_token)
+		except auth.AuthError:
+			return ""
+		_cached_id_token = session.get("idToken", "")
+		_cached_expiry = session.get("expiresAt", 0.0)
+		new_refresh = session.get("refreshToken", "")
+		if new_refresh:
+			config.conf[CONFIG_SECTION]["refreshToken"] = new_refresh
+		return _cached_id_token
+
+
+def _clear_token_cache():
+	"""Drop the in-memory token so the next call re-refreshes (used on sign-out)."""
+	global _cached_id_token, _cached_expiry
+	with _token_lock:
+		_cached_id_token = ""
+		_cached_expiry = 0.0
 
 
 def get_web_narration_interval():
@@ -77,6 +113,11 @@ def save_session(session):
 	c["userUid"] = session.get("uid", "")
 	c["userEmail"] = session.get("email", "")
 	c["userDisplayName"] = session.get("displayName", "")
+	# Prime the token cache from the fresh sign-in so the first AI call needs no refresh.
+	global _cached_id_token, _cached_expiry
+	with _token_lock:
+		_cached_id_token = session.get("idToken", "")
+		_cached_expiry = session.get("expiresAt", 0.0)
 
 
 def clear_session():
@@ -85,6 +126,7 @@ def clear_session():
 	c["userUid"] = ""
 	c["userEmail"] = ""
 	c["userDisplayName"] = ""
+	_clear_token_cache()
 
 
 class LimaSettingsPanel(SettingsPanel):
@@ -108,9 +150,8 @@ class LimaSettingsPanel(SettingsPanel):
 
 	def makeSettings(self, settingsSizer):
 		helper = gui.guiHelper.BoxSizerHelper(self, sizer=settingsSizer)
-		# Translators: Label for the OpenRouter API key field.
-		self.apiKeyEdit = helper.addLabeledControl(_("OpenRouter API &key:"), wx.TextCtrl)
-		self.apiKeyEdit.SetValue(get_api_key())
+		# The AI service is reached by signing in with Google — there is no API key to
+		# enter. Calls are proxied through the LIMA backend using the Firebase token.
 
 		# Translators: label of the Google account group in LIMA AI settings.
 		accountSizer = wx.StaticBoxSizer(wx.StaticBox(self, label=_("Google account")), wx.VERTICAL)
@@ -182,4 +223,5 @@ class LimaSettingsPanel(SettingsPanel):
 		gui.messageBox(self._SIGN_IN_ERRORS.get(code, self._SIGN_IN_ERRORS["auth_error"]), _("LIMA AI"), wx.OK | wx.ICON_ERROR)
 
 	def onSave(self):
-		config.conf[CONFIG_SECTION]["apiKey"] = self.apiKeyEdit.GetValue().strip()
+		# Nothing to persist here — sign-in state is saved by the sign-in flow itself.
+		pass

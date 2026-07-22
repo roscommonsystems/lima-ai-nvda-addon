@@ -1,5 +1,9 @@
 # -*- coding: UTF-8 -*-
 # LIMA NVDA add-on: vision LLM client. Standard library only; no NVDA imports.
+#
+# Calls go through the LIMA backend proxy (not OpenRouter directly): the add-on sends
+# its OpenAI-format body plus the user's Firebase ID token, and the backend attaches the
+# per-user OpenRouter key server-side. The OpenRouter key never reaches the client.
 
 import base64
 import json
@@ -9,7 +13,10 @@ import urllib.request
 
 log = logging.getLogger(__name__)
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+# Endpoint the chat body is POSTed to. Defaults to the LIMA backend proxy; the NVDA
+# plugin overrides ENDPOINT_URL at init from firebase_config.LIMA_BACKEND_URL. Kept
+# module-level (not imported from config) so this module stays standalone and testable.
+ENDPOINT_URL = "https://lima-addon-auth-server-dev-423416231887.us-west1.run.app/v1/chat/completions"
 
 DEFAULT_PROMPT = (
 	"Describe what is on the screen for a blind user in at most 2 to 3 short, "
@@ -103,20 +110,19 @@ def parse_response(body):
 	return text.strip()
 
 
-def _post_and_parse(payload, api_key, timeout, _opener):
-	"""POST an OpenRouter payload and return the parsed description text.
+def _post_and_parse(payload, id_token, timeout, _opener):
+	"""POST a chat payload to the LIMA backend and return the parsed description text.
 
-	Raises VisionError (speakable code) on any failure; logs the real error.
+	`id_token` is the caller's Firebase ID token; the backend supplies the OpenRouter
+	key. Raises VisionError (speakable code) on any failure; logs the real error.
 	"""
 	data = json.dumps(payload).encode("utf-8")
 	request = urllib.request.Request(
-		OPENROUTER_URL,
+		ENDPOINT_URL,
 		data=data,
 		headers={
-			"Authorization": "Bearer " + api_key,
+			"Authorization": "Bearer " + id_token,
 			"Content-Type": "application/json",
-			"HTTP-Referer": "https://roscommonsystems.com",
-			"X-Title": "LIMA AI NVDA Add-on",
 		},
 		method="POST",
 	)
@@ -143,10 +149,10 @@ def _post_and_parse(payload, api_key, timeout, _opener):
 	return parse_response(body)
 
 
-def describe_image(image_png_bytes, api_key, model=OPENROUTER_VISION_MODEL, prompt=DEFAULT_PROMPT, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
-	"""POST one screenshot to OpenRouter; return the description text."""
+def describe_image(image_png_bytes, id_token, model=OPENROUTER_VISION_MODEL, prompt=DEFAULT_PROMPT, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
+	"""POST one screenshot through the LIMA backend; return the description text."""
 	payload = build_payload(image_png_bytes, model, prompt, max_tokens)
-	return _post_and_parse(payload, api_key, timeout, _opener)
+	return _post_and_parse(payload, id_token, timeout, _opener)
 
 
 def build_changes_payload(before_png, after_png, model=OPENROUTER_VISION_MODEL, prompt=CHANGES_PROMPT, max_tokens=MAX_TOKENS):
@@ -170,11 +176,11 @@ def build_changes_payload(before_png, after_png, model=OPENROUTER_VISION_MODEL, 
 	}
 
 
-def describe_changes(before_png, after_png, api_key, model=OPENROUTER_VISION_MODEL, previous=None, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
+def describe_changes(before_png, after_png, id_token, model=OPENROUTER_VISION_MODEL, previous=None, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
 	"""POST before/after screenshots; return a description of what changed.
 
 	If `previous` (the last thing narrated) is given, the model is asked to
 	describe only what is new since then, or to reply with NO_CHANGE.
 	"""
 	payload = build_changes_payload(before_png, after_png, model, changes_prompt(previous), max_tokens)
-	return _post_and_parse(payload, api_key, timeout, _opener)
+	return _post_and_parse(payload, id_token, timeout, _opener)
