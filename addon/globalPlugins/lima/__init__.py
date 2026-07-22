@@ -16,6 +16,7 @@ from . import capture
 from . import vision
 from . import settings
 from . import webnarration
+from . import firebase_config
 
 addonHandler.initTranslation()
 
@@ -29,12 +30,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def __init__(self):
 		super().__init__()
 		settings.initialize()
+		# Point the vision client at the configured LIMA backend proxy (all AI calls go
+		# through it so the OpenRouter key never reaches the client).
+		vision.ENDPOINT_URL = firebase_config.LIMA_BACKEND_URL + "/v1/chat/completions"
 		gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(settings.LimaSettingsPanel)
 		self._describing = False
 		self._web_narrator = webnarration.WebNarrator(
 			capture,
 			vision,
-			settings.get_api_key,
+			settings.get_id_token,
 			self._speak_queued,
 			interval=settings.get_web_narration_interval(),
 			change_threshold=settings.get_web_narration_threshold(),
@@ -53,8 +57,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	# Spoken messages for each failure code (kept here so vision.py stays NVDA-free).
 	def _error_message(self, code):
 		messages = {
-			# Translators: spoken when no API key has been configured.
-			"no_key": _("Set your OpenRouter API key in LIMA AI settings."),
+			# Translators: spoken when the user is not signed in.
+			"signed_out": _("Sign in with Google in LIMA AI settings to use this feature."),
 			# Translators: spoken when a description is already in progress.
 			"busy": _("Still describing the previous screen, please wait."),
 			# Translators: spoken when the screen could not be captured.
@@ -62,7 +66,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			# Translators: spoken when the AI service cannot be reached.
 			"network": _("Could not reach the AI service. Check your connection and try again."),
 			# Translators: spoken when the AI service returns an error.
-			"api_error": _("The AI service returned an error. Check your API key in LIMA AI settings."),
+			"api_error": _("The AI service returned an error. Please try again."),
 			# Translators: spoken when the AI returns no usable description.
 			"empty": _("No description was returned. Try again."),
 		}
@@ -83,9 +87,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		gesture="kb:NVDA+shift+d",
 	)
 	def script_describeScreen(self, gesture):
-		api_key = settings.get_api_key()
-		if not api_key:
-			ui.message(self._error_message("no_key"))
+		id_token = settings.get_id_token()
+		if not id_token:
+			ui.message(self._error_message("signed_out"))
 			return
 		if self._describing:
 			ui.message(self._error_message("busy"))
@@ -104,14 +108,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			ui.message(self._error_message("capture"))
 			return
 		thread = threading.Thread(
-			target=self._run_describe, args=(png, api_key), daemon=True
+			target=self._run_describe, args=(png, id_token), daemon=True
 		)
 		thread.start()
 
-	def _run_describe(self, png, api_key):
+	def _run_describe(self, png, id_token):
 		message = self._error_message("api_error")
 		try:
-			message = vision.describe_image(png, api_key)
+			message = vision.describe_image(png, id_token)
 		except vision.VisionError as e:
 			message = self._error_message(e.code)
 		except Exception:
@@ -131,9 +135,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		gesture="kb:NVDA+shift+w",
 	)
 	def script_toggleWebNarration(self, gesture):
-		# Stopping is always allowed; only starting requires an API key.
-		if not self._web_narrator.is_active and not settings.get_api_key():
-			ui.message(self._error_message("no_key"))
+		# Stopping is always allowed; only starting requires being signed in.
+		if not self._web_narrator.is_active and not settings.get_id_token():
+			ui.message(self._error_message("signed_out"))
 			return
 		active = self._web_narrator.toggle()
 		# Translators: spoken when web narration is turned on or off.

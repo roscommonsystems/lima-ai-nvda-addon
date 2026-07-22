@@ -28,6 +28,13 @@ except ImportError:
 # product has its own dedicated database, so user docs are flat.
 FIREBASE_DATABASE_ID = "lima-nvda-addon-firestore-db"
 
+# Base URL of the LIMA Cloud Run backend (not secret). All AI calls are proxied
+# through it so the OpenRouter key never reaches the client; the add-on authenticates
+# each call with the user's Firebase ID token. Confirm the exact URL with:
+#   gcloud run services describe lima-addon-auth-server-dev --region us-west1 \
+#     --format="value(status.url)"
+LIMA_BACKEND_URL = "https://lima-addon-auth-server-dev-423416231887.us-west1.run.app"
+
 
 def is_configured():
 	"""True when the values needed to run sign-in have been injected."""
