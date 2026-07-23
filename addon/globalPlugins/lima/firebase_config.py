@@ -30,15 +30,15 @@ FIREBASE_DATABASE_ID = "lima-nvda-addon-firestore-db"
 
 # Firestore collection holding per-user docs. MUST match the auth server's
 # USERS_COLLECTION so the sign-in profile and the server's OpenRouter fields land in the
-# SAME document. This is the DEV build -> "users_dev"; the prod build uses "users".
-FIRESTORE_USERS_COLLECTION = "users_dev"
+# SAME document. This is the PROD build -> "users"; the dev build uses "users_dev".
+FIRESTORE_USERS_COLLECTION = "users"
 
 # Base URL of the LIMA Cloud Run backend (not secret). All AI calls are proxied
 # through it so the OpenRouter key never reaches the client; the add-on authenticates
 # each call with the user's Firebase ID token. Confirm the exact URL with:
-#   gcloud run services describe lima-addon-auth-server-dev --region us-west1 \
+#   gcloud run services describe lima-addon-auth-server --region us-west1 \
 #     --format="value(status.url)"
-LIMA_BACKEND_URL = "https://lima-addon-auth-server-dev-423416231887.us-west1.run.app"
+LIMA_BACKEND_URL = "https://lima-addon-auth-server-423416231887.us-west1.run.app"
 
 
 def is_configured():

@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 # Endpoint the chat body is POSTed to. Defaults to the LIMA backend proxy; the NVDA
 # plugin overrides ENDPOINT_URL at init from firebase_config.LIMA_BACKEND_URL. Kept
 # module-level (not imported from config) so this module stays standalone and testable.
-ENDPOINT_URL = "https://lima-addon-auth-server-dev-423416231887.us-west1.run.app/v1/chat/completions"
+ENDPOINT_URL = "https://lima-addon-auth-server-423416231887.us-west1.run.app/v1/chat/completions"
 
 DEFAULT_PROMPT = (
 	"Describe what is on the screen for a blind user in at most 2 to 3 short, "
