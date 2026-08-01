@@ -13,10 +13,12 @@ import urllib.request
 
 log = logging.getLogger(__name__)
 
-# Endpoint the chat body is POSTed to. Defaults to the LIMA backend proxy; the NVDA
-# plugin overrides ENDPOINT_URL at init from firebase_config.LIMA_BACKEND_URL. Kept
-# module-level (not imported from config) so this module stays standalone and testable.
-ENDPOINT_URL = "https://lima-addon-auth-server-423416231887.us-west1.run.app/v1/chat/completions"
+# Endpoint the chat body is POSTed to. Deliberately unset here: the NVDA plugin assigns
+# it at init from firebase_config.LIMA_BACKEND_URL, which is what binds the add-on to the
+# dev or prod backend chosen at build time. Kept module-level (not imported from config)
+# so this module stays standalone and testable — tests just assign it. A hardcoded default
+# used to live here, a second copy of the URL that silently went stale.
+ENDPOINT_URL = None
 
 DEFAULT_PROMPT = (
 	"Describe what is on the screen for a blind user in at most 2 to 3 short, "
@@ -116,6 +118,11 @@ def _post_and_parse(payload, id_token, timeout, _opener):
 	`id_token` is the caller's Firebase ID token; the backend supplies the OpenRouter
 	key. Raises VisionError (speakable code) on any failure; logs the real error.
 	"""
+	if not ENDPOINT_URL:
+		# The plugin assigns this at init; unset means the add-on was loaded without that
+		# happening. Fail with a speakable code rather than a urllib TypeError.
+		log.error("vision.ENDPOINT_URL is unset; the LIMA backend URL was never configured")
+		raise VisionError("api_error")
 	data = json.dumps(payload).encode("utf-8")
 	request = urllib.request.Request(
 		ENDPOINT_URL,
