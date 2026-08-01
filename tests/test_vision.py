@@ -7,6 +7,16 @@ import pytest
 import vision
 
 
+@pytest.fixture(autouse=True)
+def _endpoint_url(monkeypatch):
+	"""Stand in for the NVDA plugin, which assigns vision.ENDPOINT_URL at init.
+
+	The module deliberately ships it unset so the dev/prod backend chosen at build time
+	is the only source of the URL (see firebase_config._ENVIRONMENTS).
+	"""
+	monkeypatch.setattr(vision, "ENDPOINT_URL", "https://backend.test/v1/chat/completions")
+
+
 def test_build_payload_has_model_and_image_data_url():
 	payload = vision.build_payload(b"PNGDATA", "some/model", "describe please")
 	assert payload["model"] == "some/model"
@@ -50,6 +60,15 @@ def test_describe_image_success_returns_text():
 	raw = json.dumps({"choices": [{"message": {"content": "A login form."}}]}).encode("utf-8")
 	text = vision.describe_image(b"img", "key", "m", _opener=_fake_opener(raw_bytes=raw))
 	assert text == "A login form."
+
+
+def test_describe_image_raises_api_error_when_endpoint_url_unset(monkeypatch):
+	"""An unconfigured backend URL must fail speakably, not with a urllib TypeError."""
+	monkeypatch.setattr(vision, "ENDPOINT_URL", None)
+	raw = json.dumps({"choices": [{"message": {"content": "A login form."}}]}).encode("utf-8")
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_image(b"img", "key", "m", _opener=_fake_opener(raw_bytes=raw))
+	assert exc.value.code == "api_error"
 
 
 def test_describe_image_network_failure_raises_network_code():
