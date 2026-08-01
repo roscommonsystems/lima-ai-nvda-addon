@@ -38,6 +38,26 @@ scons
 
 This produces `LIMA-x.y.nvda-addon`. Install it via NVDA -> Tools -> Add-on Store -> Install from external source.
 
+### Dev vs prod builds
+
+Which backend the add-on talks to is baked in **at build time** — never by editing source:
+
+```
+scons          # prod: lima-addon-auth-server,     collection "users"
+scons dev=1    # dev:  lima-addon-auth-server-dev, collection "users_dev"
+```
+
+Both environments' values are committed in `firebase_config.py` (`_ENVIRONMENTS`); the build
+writes the selection to the generated, gitignored `addon/globalPlugins/lima/build_env.py`.
+The two artifacts are named differently (`LIMA-0.2.0` vs a dated `LIMA-YYYYMMDD.0.0`), so a
+dev build is hard to mistake for a release.
+
+**Do not hand-edit the URL or collection to switch environments.** They must move together —
+the add-on writes the sign-in profile to Firestore directly while the auth server writes the
+OpenRouter fields to the *same* document, so a mismatched pair splits user records in half.
+An unbuilt source checkout (no `build_env.py`) resolves to **dev** deliberately, so running
+from source can't write test data into live user documents.
+
 ## Test
 
 ```
