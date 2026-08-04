@@ -30,13 +30,13 @@ addon_info = AddonInfo(
 	addon_version="0.2.0",
 	# Brief changelog for this version
 	# Translators: what's new content for the add-on version to be shown in the add-on store
-	addon_changelog=_("Describe the screen using the LIMA desktop model."),
+	addon_changelog=_("Sign in with Google; screen description and web narration run through the LIMA backend (no API key needed)."),
 	# Author(s)
 	addon_author="Roscommon Systems",
 	# URL for the add-on documentation support
-	addon_url=None,
+	addon_url="https://github.com/roscommonsystems/lima-ai-nvda-addon",
 	# URL for the add-on repository where the source code can be found
-	addon_sourceURL=None,
+	addon_sourceURL="https://github.com/roscommonsystems/lima-ai-nvda-addon",
 	# Documentation file name
 	addon_docFileName="readme.html",
 	# Minimum NVDA version supported (e.g. "2019.3.0", minor version is optional)
@@ -70,6 +70,9 @@ i18nSources: list[str] = pythonSources + ["buildVars.py"]
 # Paths are relative to the addon directory, not to the root directory of your addon sources.
 # You can either list every file (using ""/") as a path separator,
 # or use glob expressions.
+# secret_config.py is intentionally NOT excluded: the release build bundles it so the
+# packaged add-on carries the (non-secret) Firebase sign-in config. It is kept out of git
+# via .gitignore, not out of the build.
 excludedFiles: list[str] = []
 
 # Base language for the NVDA add-on
