@@ -72,10 +72,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		}
 		return messages.get(code, messages["api_error"])
 
+	# Default gestures use the NVDA+Alt layer, which NVDA core leaves free apart from the
+	# braille auto-scroll keys (J/K/L). We deliberately avoid NVDA+Shift+D and similar,
+	# because those already map to NVDA commands (NVDA+Shift+D is the audio-ducking toggle).
+	# The minor "announce running" health check ships unbound. Every command has a
+	# description and scriptCategory, so all of them appear in NVDA's Input Gestures dialog
+	# under "LIMA AI" for the user to reassign or add shortcuts of their own.
 	@script(
 		# Translators: Description of the command that confirms the add-on loaded.
 		description=_("Announces that the LIMA AI add-on is running."),
-		gesture="kb:NVDA+shift+l",
 	)
 	def script_announceRunning(self, gesture):
 		# Translators: Spoken message confirming the add-on is active.
@@ -84,7 +89,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	@script(
 		# Translators: Description of the describe-screen command.
 		description=_("Describe what is currently on the screen."),
-		gesture="kb:NVDA+shift+d",
+		gesture="kb:NVDA+alt+d",
 	)
 	def script_describeScreen(self, gesture):
 		id_token = settings.get_id_token()
@@ -132,7 +137,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	@script(
 		# Translators: Description of the command that toggles web narration.
 		description=_("Toggle dynamic web narration on or off."),
-		gesture="kb:NVDA+shift+w",
+		gesture="kb:NVDA+alt+w",
 	)
 	def script_toggleWebNarration(self, gesture):
 		# Stopping is always allowed; only starting requires being signed in.
