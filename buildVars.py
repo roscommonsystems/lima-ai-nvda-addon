@@ -27,10 +27,10 @@ addon_info = AddonInfo(
 		"press a shortcut and NVDA speaks a brief AI description of the active monitor."
 	),
 	# version
-	addon_version="0.2.0",
+	addon_version="0.2.1",
 	# Brief changelog for this version
 	# Translators: what's new content for the add-on version to be shown in the add-on store
-	addon_changelog=_("Sign in with Google; screen description and web narration run through the LIMA backend (no API key needed)."),
+	addon_changelog=_("Default shortcuts moved to the NVDA+Alt layer so they no longer override NVDA's built-in commands; all commands remain reassignable in Input Gestures."),
 	# Author(s)
 	addon_author="Roscommon Systems",
 	# URL for the add-on documentation support
