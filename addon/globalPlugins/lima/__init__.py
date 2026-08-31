@@ -10,6 +10,7 @@ import queueHandler
 import speech
 from speech.priorities import Spri
 import addonHandler
+import core
 from scriptHandler import script
 
 from . import capture
@@ -45,6 +46,21 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			# Translators: spoken before each dynamic web-narration update.
 			narration_prefix=_("Web page update:") + " ",
 		)
+		# On first run, announce the add-on and its default shortcuts so users learn how to
+		# use it without hunting through Input Gestures. Deferred a few seconds so it does not
+		# collide with NVDA's own startup speech, and shown only once (welcomeShown flag).
+		if not settings.is_welcome_shown():
+			settings.mark_welcome_shown()
+			core.callLater(
+				4000,
+				ui.message,
+				# Translators: one-time spoken introduction naming the add-on's shortcuts.
+				_(
+					"Welcome to LIMA AI. To describe your screen press NVDA+Alt+D, "
+					"and to toggle web narration press NVDA+Alt+W. "
+					"You can change these shortcuts in NVDA's Input Gestures."
+				),
+			)
 
 	def terminate(self):
 		self._web_narrator.stop()
@@ -100,10 +116,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			ui.message(self._error_message("busy"))
 			return
 		self._describing = True
-		if not settings.is_welcome_shown():
-			# Translators: one-time message pointing users to the full desktop product.
-			ui.message(_("Welcome to LIMA AI for NVDA. For the full hands-free experience, try the LIMA desktop app."))
-			settings.mark_welcome_shown()
 		# Translators: spoken immediately when a description request starts.
 		ui.message(_("Describing screen."))
 		try:
