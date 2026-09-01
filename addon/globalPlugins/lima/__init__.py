@@ -157,8 +157,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._last_narration_time = now
 		if fresh:
 			mode = section["webNarrationPreAnnounce"]
-			if mode == "speech" and section["webNarrationPrefix"]:
-				queueHandler.queueFunction(queueHandler.eventQueue, speech.speakMessage, section["webNarrationPrefix"], Spri.NEXT)
+			if mode == "speech":
+				# Translators: spoken before each web-narration update.
+				queueHandler.queueFunction(queueHandler.eventQueue, speech.speakMessage, _("Web page update:"), Spri.NEXT)
 			elif mode == "sound":
 				queueHandler.queueFunction(queueHandler.eventQueue, tones.beep, 660, 80)
 		queueHandler.queueFunction(queueHandler.eventQueue, speech.speakMessage, text, Spri.NEXT)

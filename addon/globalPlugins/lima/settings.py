@@ -24,7 +24,6 @@ CONFIG_SPEC = {
 	"webNarrationIntervalSeconds": "float(default=6.0)",
 	"webNarrationChangeThreshold": "float(default=0.03)",
 	"webNarrationPreAnnounce": 'string(default="speech")',
-	"webNarrationPrefix": 'string(default="Web page update:")',
 	"refreshToken": 'string(default="")',
 	"userUid": 'string(default="")',
 	"userEmail": 'string(default="")',
@@ -183,12 +182,6 @@ class LimaSettingsPanel(SettingsPanel):
 		self.preAnnounceChoice.SetSelection(
 			self._preAnnounceValues.index(stored) if stored in self._preAnnounceValues else 0
 		)
-		self.preAnnounceText = narrationHelper.addLabeledControl(
-			# Translators: label for the editable spoken pre-announcement text.
-			_("Spoken text:"),
-			wx.TextCtrl,
-			value=config.conf[CONFIG_SECTION]["webNarrationPrefix"],
-		)
 
 	def _account_status(self):
 		if is_signed_in():
@@ -251,6 +244,5 @@ class LimaSettingsPanel(SettingsPanel):
 		gui.messageBox(self._SIGN_IN_ERRORS.get(code, self._SIGN_IN_ERRORS["auth_error"]), _("LIMA AI"), wx.OK | wx.ICON_ERROR)
 
 	def onSave(self):
-		# Sign-in state is saved by the sign-in flow itself; persist the web-narration options.
+		# Sign-in state is saved by the sign-in flow itself; persist the web-narration option.
 		config.conf[CONFIG_SECTION]["webNarrationPreAnnounce"] = self._preAnnounceValues[self.preAnnounceChoice.GetSelection()]
-		config.conf[CONFIG_SECTION]["webNarrationPrefix"] = self.preAnnounceText.GetValue()
