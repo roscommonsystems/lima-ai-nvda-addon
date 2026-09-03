@@ -2,6 +2,7 @@
 # LIMA NVDA add-on: global plugin.
 
 import threading
+import time
 
 import globalPluginHandler
 import ui
@@ -10,7 +11,9 @@ import queueHandler
 import speech
 from speech.priorities import Spri
 import addonHandler
+import config
 import core
+import tones
 from scriptHandler import script
 
 from . import capture
@@ -36,6 +39,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		vision.ENDPOINT_URL = firebase_config.LIMA_BACKEND_URL + "/v1/chat/completions"
 		gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(settings.LimaSettingsPanel)
 		self._describing = False
+		self._last_narration_time = 0.0
 		self._web_narrator = webnarration.WebNarrator(
 			capture,
 			vision,
@@ -43,8 +47,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			self._speak_queued,
 			interval=settings.get_web_narration_interval(),
 			change_threshold=settings.get_web_narration_threshold(),
-			# Translators: spoken before each dynamic web-narration update.
-			narration_prefix=_("Web page update:") + " ",
 		)
 		# On first run, announce the add-on and its default shortcuts so users learn how to
 		# use it without hunting through Input Gestures. Deferred a few seconds so it does not
@@ -143,7 +145,23 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		queueHandler.queueFunction(queueHandler.eventQueue, ui.message, message)
 
 	def _speak_queued(self, text):
-		# Queued at NEXT priority so it never interrupts what NVDA is reading.
+		# Runs on the web-narration timer thread. Everything is queued at NEXT priority so it
+		# never interrupts what NVDA is reading. The pre-announcement (a spoken phrase, a short
+		# beep, or nothing) comes from settings and is suppressed during a rapid run of updates
+		# (a playing video): it is only given when the previous update was more than two
+		# intervals ago, a genuinely new change rather than a continuing stream. The description
+		# itself is always spoken.
+		section = config.conf[settings.CONFIG_SECTION]
+		now = time.time()
+		fresh = (now - self._last_narration_time) > (2 * section["webNarrationIntervalSeconds"])
+		self._last_narration_time = now
+		if fresh:
+			mode = section["webNarrationPreAnnounce"]
+			if mode == "speech":
+				# Translators: spoken before each web-narration update.
+				queueHandler.queueFunction(queueHandler.eventQueue, speech.speakMessage, _("Web page update:"), Spri.NEXT)
+			elif mode == "sound":
+				queueHandler.queueFunction(queueHandler.eventQueue, tones.beep, 660, 80)
 		queueHandler.queueFunction(queueHandler.eventQueue, speech.speakMessage, text, Spri.NEXT)
 
 	@script(

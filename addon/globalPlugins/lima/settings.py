@@ -23,6 +23,7 @@ CONFIG_SPEC = {
 	"welcomeShown": "boolean(default=false)",
 	"webNarrationIntervalSeconds": "float(default=6.0)",
 	"webNarrationChangeThreshold": "float(default=0.03)",
+	"webNarrationPreAnnounce": 'string(default="speech")',
 	"refreshToken": 'string(default="")',
 	"userUid": 'string(default="")',
 	"userEmail": 'string(default="")',
@@ -162,6 +163,26 @@ class LimaSettingsPanel(SettingsPanel):
 		self.signInButton = accountHelper.addItem(wx.Button(accountBox, label=self._button_label()))
 		self.signInButton.Bind(wx.EVT_BUTTON, self.onSignInOut)
 
+		# Translators: label of the web-narration options group in LIMA AI settings.
+		narrationSizer = wx.StaticBoxSizer(wx.StaticBox(self, label=_("Web narration")), wx.VERTICAL)
+		narrationBox = narrationSizer.GetStaticBox()
+		narrationHelper = gui.guiHelper.BoxSizerHelper(narrationBox, sizer=narrationSizer)
+		helper.addItem(narrationHelper)
+		# Before speaking each update, LIMA can speak a short phrase, play a sound, or say
+		# nothing. These three options map to the stored values speech/sound/off, in order.
+		self._preAnnounceValues = ["speech", "sound", "off"]
+		self.preAnnounceChoice = narrationHelper.addLabeledControl(
+			# Translators: label for the web-narration pre-announcement choice.
+			_("Announce before each update:"),
+			wx.Choice,
+			# Translators: the three pre-announcement options, in the order of _preAnnounceValues.
+			choices=[_("Speak text"), _("Play a sound"), _("Off")],
+		)
+		stored = config.conf[CONFIG_SECTION]["webNarrationPreAnnounce"]
+		self.preAnnounceChoice.SetSelection(
+			self._preAnnounceValues.index(stored) if stored in self._preAnnounceValues else 0
+		)
+
 	def _account_status(self):
 		if is_signed_in():
 			# Translators: shown when a user is signed in; %s is their email or name.
@@ -223,5 +244,5 @@ class LimaSettingsPanel(SettingsPanel):
 		gui.messageBox(self._SIGN_IN_ERRORS.get(code, self._SIGN_IN_ERRORS["auth_error"]), _("LIMA AI"), wx.OK | wx.ICON_ERROR)
 
 	def onSave(self):
-		# Nothing to persist here — sign-in state is saved by the sign-in flow itself.
-		pass
+		# Sign-in state is saved by the sign-in flow itself; persist the web-narration option.
+		config.conf[CONFIG_SECTION]["webNarrationPreAnnounce"] = self._preAnnounceValues[self.preAnnounceChoice.GetSelection()]
