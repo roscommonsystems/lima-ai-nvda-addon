@@ -112,10 +112,10 @@ def test_save_user_login_new_user_writes_flat_created_at():
 	request = captured["request"]
 	assert request.get_method() == "PATCH"
 	assert request.headers["Authorization"] == "Bearer tok"
-	assert "updateMask.fieldPaths=createdAt" in request.full_url
+	assert "updateMask.fieldPaths=account_created_at" in request.full_url
 	body = json.loads(request.data.decode("utf-8"))
 	assert body["fields"]["email"]["stringValue"] == "a@b.com"
-	assert body["fields"]["createdAt"]["timestampValue"] == "2026-07-13T00:00:00.000000Z"
+	assert body["fields"]["account_created_at"]["timestampValue"] == "2026-07-13T00:00:00.000000Z"
 
 
 def test_save_user_login_uses_named_database_in_url():
@@ -137,12 +137,12 @@ def test_save_user_login_writes_environment_fields_when_present():
 		_opener=_fake_opener(raw_bytes=b"{}", capture=captured),
 	)
 	request = captured["request"]
-	for path in ("ipAddress", "systemLanguage", "userAgent", "country"):
+	for path in ("ip_address", "system_language", "user_agent", "country"):
 		assert "updateMask.fieldPaths=" + path in request.full_url
 	body = json.loads(request.data.decode("utf-8"))
-	assert body["fields"]["ipAddress"]["stringValue"] == "203.0.113.5"
-	assert body["fields"]["systemLanguage"]["stringValue"] == "en-US"
-	assert body["fields"]["userAgent"]["stringValue"] == "Mozilla/5.0 (Windows NT 10.0)"
+	assert body["fields"]["ip_address"]["stringValue"] == "203.0.113.5"
+	assert body["fields"]["system_language"]["stringValue"] == "en-US"
+	assert body["fields"]["user_agent"]["stringValue"] == "Mozilla/5.0 (Windows NT 10.0)"
 	assert body["fields"]["country"]["stringValue"] == "SG"
 
 
@@ -154,7 +154,7 @@ def test_save_user_login_omits_environment_fields_when_blank():
 	)
 	request = captured["request"]
 	body = json.loads(request.data.decode("utf-8"))
-	for path in ("ipAddress", "systemLanguage", "userAgent", "country"):
+	for path in ("ip_address", "system_language", "user_agent", "country"):
 		assert path not in body["fields"]
 		assert "updateMask.fieldPaths=" + path not in request.full_url
 
@@ -166,10 +166,116 @@ def test_save_user_login_returning_user_omits_created_at():
 		include_created=False,
 		_opener=_fake_opener(raw_bytes=b"{}", capture=captured),
 	)
-	assert "createdAt" not in captured["request"].full_url
+	assert "account_created_at" not in captured["request"].full_url
 	body = json.loads(captured["request"].data.decode("utf-8"))
-	assert "createdAt" not in body["fields"]
-	assert "lastLoginAt" in body["fields"]
+	assert "account_created_at" not in body["fields"]
+	assert "last_login_at" in body["fields"]
+
+
+# --- The September 2026 snake_case rename -------------------------------------
+#
+# The profile field names moved to snake_case to match what the LIMA servers write
+# into these same documents. `createdAt` became `account_created_at`: it sat next
+# to lima-auth-server's `created_at`, which meant the KEY's age rather than the
+# account's, and the pair read as one duplicated field.
+#
+# The write-once guard is the part worth pinning. This is a desktop add-on, so
+# versions written before the rename stay in use for as long as users take to
+# upgrade, and they keep writing `createdAt`. A guard that read only the new name
+# would treat each of those users as brand new and stamp today's date over their
+# real signup date -- silently, and with no way to recover it.
+
+def _store_user_with_existing(existing, capture):
+	"""Run _store_user against a document that already has these fields."""
+	config = auth.FirebaseConfig(
+		client_id="cid", client_secret="sec", api_key="key",
+		project_id="proj", database_id="db", users_collection="users_dev",
+	)
+	session = {
+		"uid": "uid-9", "idToken": "tok", "email": "a@b.com", "displayName": "Ada",
+	}
+
+	calls = []
+
+	@contextmanager
+	def opener(request, timeout=None):
+		calls.append(request)
+		capture["request"] = request  # the PATCH is the last call
+
+		class _Resp:
+			def read(self_inner):
+				# First call is the GET of the existing document.
+				return json.dumps(existing).encode("utf-8") if len(calls) == 1 else b"{}"
+
+		yield _Resp()
+
+	auth._store_user(config, session, _opener=opener)
+
+
+def test_a_legacy_created_at_is_not_overwritten():
+	captured = {}
+	_store_user_with_existing(
+		{"fields": {"createdAt": {"timestampValue": "2026-01-01T00:00:00Z"}}}, captured
+	)
+	body = json.loads(captured["request"].data.decode("utf-8"))
+	assert "account_created_at" not in body["fields"], \
+		"an add-on predating the rename wrote createdAt; today's date must not replace it"
+
+
+def test_a_migrated_account_created_at_is_not_overwritten():
+	captured = {}
+	_store_user_with_existing(
+		{"fields": {"account_created_at": {"timestampValue": "2026-01-01T00:00:00Z"}}}, captured
+	)
+	body = json.loads(captured["request"].data.decode("utf-8"))
+	assert "account_created_at" not in body["fields"]
+
+
+def test_a_genuinely_new_user_does_get_a_created_date():
+	captured = {}
+	_store_user_with_existing({"fields": {"email": {"stringValue": "a@b.com"}}}, captured)
+	body = json.loads(captured["request"].data.decode("utf-8"))
+	assert "account_created_at" in body["fields"], \
+		"a document with neither spelling is a first sign-in"
+
+
+def test_the_mask_and_the_body_always_agree():
+	"""An updateMask path naming no field in the body DELETES that field.
+
+	So the mask entries had to be renamed along with the fields; this is what
+	would catch a half-finished rename.
+	"""
+	captured = {}
+	auth.save_user_login(
+		"proj", "uid-9", "tok", "a@b.com", "Ada",
+		include_created=True, ip_address="203.0.113.5", system_language="en-US",
+		user_agent="Mozilla/5.0", country="SG",
+		_opener=_fake_opener(raw_bytes=b"{}", capture=captured),
+	)
+	request = captured["request"]
+	masked = {
+		p.split("=", 1)[1]
+		for p in request.full_url.split("?", 1)[1].split("&")
+		if p.startswith("updateMask.fieldPaths=")
+	}
+	written = set(json.loads(request.data.decode("utf-8"))["fields"])
+	assert masked == written
+
+
+def test_no_camelcase_field_name_survives_anywhere():
+	"""One assertion over the whole write, so a missed field cannot slip through."""
+	captured = {}
+	auth.save_user_login(
+		"proj", "uid-9", "tok", "a@b.com", "Ada",
+		include_created=True, ip_address="203.0.113.5", system_language="en-US",
+		user_agent="Mozilla/5.0", country="SG",
+		_opener=_fake_opener(raw_bytes=b"{}", capture=captured),
+	)
+	request = captured["request"]
+	for retired in ("displayName", "lastLoginAt", "createdAt", "ipAddress",
+					"systemLanguage", "userAgent"):
+		assert retired not in request.data.decode("utf-8")
+		assert retired not in request.full_url
 
 
 def test_parse_request_extracts_query_and_user_agent():
