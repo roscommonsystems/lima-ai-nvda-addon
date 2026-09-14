@@ -49,7 +49,7 @@ exchange.
 NVDA add-on (pure Python, stdlib only)
   1. Google OAuth loopback  ──►  Google ID token
   2. signInWithIdp (REST)   ──►  Firebase idToken + refreshToken + profile
-  3. Firestore REST write   ──►  users/{uid}: email, displayName, createdAt, lastLoginAt
+  3. Firestore REST write   ──►  users/{uid}: email, display_name, account_created_at, last_login_at
                                   (authorized with the Firebase idToken)
 
 No backend. Firestore security rules enforce that a user can only
@@ -156,9 +156,11 @@ panel so NVDA's UI does not freeze):
 6. **`signInWithIdp`** posts the Google id_token to Firebase → Firebase
    **idToken** + **refreshToken** + profile (`localId`, `email`, `displayName`).
 7. **Firestore write.** `get_user_document` checks whether `users/{uid}` exists;
-   `save_user_login` then upserts `email`, `displayName`, `lastLoginAt` always,
-   and `createdAt` only on the first sign-in. An `updateMask` is used so only
-   these fields are touched and any other fields on the doc are preserved.
+   `save_user_login` then upserts `email`, `display_name`, `last_login_at` always,
+   and `account_created_at` only on the first sign-in. An `updateMask` is used so
+   only these fields are touched and any other fields on the doc are preserved —
+   including the OpenRouter fields `lima-addon-auth-server` merges into the same
+   document.
 8. The session (`uid`, `email`, `displayName`, `idToken`, `refreshToken`,
    `expiresAt`) is returned; the settings panel stores the refresh token and
    profile in NVDA config and updates the UI.
@@ -177,12 +179,26 @@ launch.
 | Field | Type | When written |
 |-------|------|--------------|
 | `email` | string | every sign-in |
-| `displayName` | string | every sign-in |
-| `createdAt` | timestamp | first sign-in only |
-| `lastLoginAt` | timestamp | every sign-in |
+| `display_name` | string | every sign-in |
+| `account_created_at` | timestamp | first sign-in only |
+| `last_login_at` | timestamp | every sign-in |
+| `ip_address` · `system_language` · `user_agent` · `country` | string | every sign-in, when captured |
 
 `{uid}` is the Firebase user id (`localId`), stable per Google account per
 project.
+
+**Field names are snake_case** as of September 2026, matching what the LIMA
+servers write into these same documents. `createdAt` became `account_created_at`
+specifically: it sat beside lima-auth-server's `created_at`, which means the
+*key's* age rather than the *account's*, and the two read as one duplicated field
+while actually diverging on every tier change.
+
+The write-once guard in `_store_user` reads **both** spellings of the created
+date. This is a desktop add-on, so builds predating the rename stay in use until
+users upgrade and keep writing `createdAt`; a guard reading only the new name
+would treat each of those users as brand new and overwrite their real signup date
+with today's. `lima-addon-auth-server/migrate_field_names.py` clears the retired
+names, and is idempotent so it can be re-run as stragglers upgrade.
 
 ---
 
