@@ -5,7 +5,7 @@
 # Flow (all client-side, no backend):
 #   1. Google OAuth 2.0 "installed app" loopback flow  -> Google ID token
 #   2. Firebase accounts:signInWithIdp (REST)          -> Firebase idToken + refreshToken + profile
-#   3. Firestore REST write of users/{uid}             -> email, displayName, createdAt, lastLoginAt
+#   3. Firestore REST write of users/{uid}             -> email, display_name, account_created_at, last_login_at
 # The Firebase idToken is refreshed via securetoken.googleapis.com.
 
 import base64
@@ -216,22 +216,31 @@ def save_user_login(project_id, uid, id_token, email, display_name, include_crea
 	"""Upsert the flat profile fields on users/{uid}, touching only what we set.
 
 	An updateMask lists exactly the fields written, so any other fields on the
-	document are preserved. createdAt is written only on the first sign-in;
+	document are preserved -- including the OpenRouter fields that
+	lima-addon-auth-server merges into this same document.
+	account_created_at is written only on the first sign-in;
 	ip_address/system_language/user_agent/country are written only when known.
+
+	Field names are snake_case as of September 2026, matching what the LIMA
+	servers write. They were camelCase before, and `createdAt` in particular
+	collided in meaning with lima-auth-server's `created_at` (which meant the
+	key's age, not the account's) -- hence `account_created_at` here, which says
+	which of the two this is. The mask entries must be renamed with the fields:
+	an updateMask path that names no field in the body deletes that field.
 	"""
 	now = now or _now_rfc3339()
 	fields = {
 		"email": {"stringValue": email},
-		"displayName": {"stringValue": display_name},
-		"lastLoginAt": {"timestampValue": now},
+		"display_name": {"stringValue": display_name},
+		"last_login_at": {"timestampValue": now},
 	}
-	mask = ["email", "displayName", "lastLoginAt"]
+	mask = ["email", "display_name", "last_login_at"]
 	if include_created:
-		fields["createdAt"] = {"timestampValue": now}
-		mask.append("createdAt")
+		fields["account_created_at"] = {"timestampValue": now}
+		mask.append("account_created_at")
 	# Environment fields: only write the ones we actually captured, so a failed
 	# lookup never overwrites a previously stored value with a blank.
-	for name, value in (("ipAddress", ip_address), ("systemLanguage", system_language), ("userAgent", user_agent), ("country", country)):
+	for name, value in (("ip_address", ip_address), ("system_language", system_language), ("user_agent", user_agent), ("country", country)):
 		if value:
 			fields[name] = {"stringValue": value}
 			mask.append(name)
@@ -255,7 +264,13 @@ def _store_user(config, session, _opener=None):
 		config.project_id, session["uid"], session["idToken"],
 		database_id=config.database_id, collection=config.users_collection, _opener=_opener,
 	)
-	has_created = bool(existing and "createdAt" in existing.get("fields", {}))
+	# Both spellings count. `createdAt` is what add-on versions before the
+	# September 2026 rename wrote, and this is a desktop add-on: those versions
+	# stay in use for as long as users take to upgrade. Reading only the new name
+	# would treat every one of those users as signing in for the first time and
+	# stamp today's date over their real one, silently and unrecoverably.
+	fields_present = existing.get("fields", {}) if existing else {}
+	has_created = "account_created_at" in fields_present or "createdAt" in fields_present
 	save_user_login(
 		config.project_id,
 		session["uid"],
