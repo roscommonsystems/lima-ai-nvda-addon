@@ -12,6 +12,12 @@ The default shortcuts use the `NVDA+Alt` layer so they do not override any built
 
 Continuous narration and computer control remain exclusive to the LIMA desktop app.
 
+## Language
+
+LIMA AI can reply in **English** (default) or **Tagalog**, chosen in NVDA menu → Preferences → Settings → LIMA AI → **Language**. The reply is tagged with the chosen language so NVDA pronounces it with that language's voice.
+
+For Tagalog, use a synthesizer that has a Filipino voice. NVDA's built-in **eSpeak NG** supports Filipino: set Settings → Speech → Synthesizer to eSpeak NG. If it sounds too fast, lower the Rate in the same panel and turn off "Rate boost". Windows OneCore voices do not include Filipino, so Tagalog is not pronounced correctly on those.
+
 ## How it works
 
 The user signs in with **Google** (NVDA menu → Preferences → Settings → LIMA AI → Sign in with Google). AI calls go through the **LIMA backend proxy**: the add-on sends the screenshot plus the user's Firebase ID token, and the backend attaches the AI provider key server-side. **No API key or provider secret lives in this open-source add-on.** The vision model is fixed to `google/gemma-4-31b-it`, and every request carries a Zero-Data-Retention provider policy.

@@ -51,6 +51,20 @@ def changes_prompt(previous=None):
 		+ " If nothing meaningful is new, reply with exactly %s." % NO_CHANGE
 	)
 
+
+# Response language. English uses the base prompts as-is; other languages get an explicit
+# instruction appended so the model replies in that language.
+LANGUAGE_NAMES = {"tl": "Tagalog"}
+
+
+def _localize(prompt, language):
+	"""Append a response-language instruction unless the language is English (the default)."""
+	name = LANGUAGE_NAMES.get(language)
+	if not name:
+		return prompt
+	return prompt + f" Respond in {name}."
+
+
 OPENROUTER_VISION_MODEL = "google/gemma-4-31b-it"
 
 # Vetted, trusted ZDR-supporting providers, in priority order (Weights & Biases first).
@@ -156,9 +170,9 @@ def _post_and_parse(payload, id_token, timeout, _opener):
 	return parse_response(body)
 
 
-def describe_image(image_png_bytes, id_token, model=OPENROUTER_VISION_MODEL, prompt=DEFAULT_PROMPT, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
+def describe_image(image_png_bytes, id_token, model=OPENROUTER_VISION_MODEL, prompt=DEFAULT_PROMPT, max_tokens=MAX_TOKENS, timeout=30, language="en", _opener=None):
 	"""POST one screenshot through the LIMA backend; return the description text."""
-	payload = build_payload(image_png_bytes, model, prompt, max_tokens)
+	payload = build_payload(image_png_bytes, model, _localize(prompt, language), max_tokens)
 	return _post_and_parse(payload, id_token, timeout, _opener)
 
 
@@ -183,11 +197,11 @@ def build_changes_payload(before_png, after_png, model=OPENROUTER_VISION_MODEL, 
 	}
 
 
-def describe_changes(before_png, after_png, id_token, model=OPENROUTER_VISION_MODEL, previous=None, max_tokens=MAX_TOKENS, timeout=30, _opener=None):
+def describe_changes(before_png, after_png, id_token, model=OPENROUTER_VISION_MODEL, previous=None, max_tokens=MAX_TOKENS, timeout=30, language="en", _opener=None):
 	"""POST before/after screenshots; return a description of what changed.
 
 	If `previous` (the last thing narrated) is given, the model is asked to
 	describe only what is new since then, or to reply with NO_CHANGE.
 	"""
-	payload = build_changes_payload(before_png, after_png, model, changes_prompt(previous), max_tokens)
+	payload = build_changes_payload(before_png, after_png, model, _localize(changes_prompt(previous), language), max_tokens)
 	return _post_and_parse(payload, id_token, timeout, _opener)

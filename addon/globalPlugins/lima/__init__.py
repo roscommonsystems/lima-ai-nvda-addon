@@ -10,7 +10,9 @@ import gui
 import queueHandler
 import speech
 from speech.priorities import Spri
+from speech.commands import LangChangeCommand
 import addonHandler
+import braille
 import config
 import core
 import tones
@@ -23,6 +25,12 @@ from . import webnarration
 from . import firebase_config
 
 addonHandler.initTranslation()
+
+
+# Maps a selected reply language to the NVDA/synth locale, so a non-English reply is spoken
+# with that language's voice (needs a synth that supports it, e.g. eSpeak NG has Filipino).
+# English is absent: the reply is already in the default voice's language.
+_SPEECH_LOCALES = {"tl": "fil"}
 
 
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
@@ -45,6 +53,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			vision,
 			settings.get_id_token,
 			self._speak_queued,
+			get_language=settings.get_language,
 			interval=settings.get_web_narration_interval(),
 			change_threshold=settings.get_web_narration_threshold(),
 		)
@@ -133,8 +142,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def _run_describe(self, png, id_token):
 		message = self._error_message("api_error")
+		locale = None
 		try:
-			message = vision.describe_image(png, id_token)
+			message = vision.describe_image(png, id_token, language=settings.get_language())
+			# A successful description is in the selected reply language; the error messages
+			# above stay in the interface language, so only tag the language on success.
+			locale = _SPEECH_LOCALES.get(settings.get_language())
 		except vision.VisionError as e:
 			message = self._error_message(e.code)
 		except Exception:
@@ -142,7 +155,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		finally:
 			self._describing = False
 		# NVDA speech must run on the main thread.
-		queueHandler.queueFunction(queueHandler.eventQueue, ui.message, message)
+		queueHandler.queueFunction(queueHandler.eventQueue, self._speak_localized, message, locale, Spri.NORMAL, True)
 
 	def _speak_queued(self, text):
 		# Runs on the web-narration timer thread. Everything is queued at NEXT priority so it
@@ -162,7 +175,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				queueHandler.queueFunction(queueHandler.eventQueue, speech.speakMessage, _("Web page update:"), Spri.NEXT)
 			elif mode == "sound":
 				queueHandler.queueFunction(queueHandler.eventQueue, tones.beep, 660, 80)
-		queueHandler.queueFunction(queueHandler.eventQueue, speech.speakMessage, text, Spri.NEXT)
+		locale = _SPEECH_LOCALES.get(settings.get_language())
+		queueHandler.queueFunction(queueHandler.eventQueue, self._speak_localized, text, locale, Spri.NEXT, False)
+
+	def _speak_localized(self, text, locale, priority, show_in_braille):
+		"""Speak `text` at `priority` on the main thread. When `locale` is set, switch the voice
+		to that language so a non-English reply is pronounced by a synth that supports it; show it
+		in braille when asked (the on-demand description does, continuous narration does not)."""
+		if locale:
+			speech.speak([LangChangeCommand(locale), text], priority=priority)
+		else:
+			speech.speakMessage(text, priority)
+		if show_in_braille:
+			braille.handler.message(text)
 
 	@script(
 		# Translators: Description of the command that toggles web narration.

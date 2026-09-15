@@ -202,3 +202,27 @@ def test_describe_changes_threads_previous_into_the_prompt():
 	vision.describe_changes(b"a", b"b", "key", previous="A menu was open.", _opener=opener)
 	text = captured["body"]["messages"][0]["content"][0]["text"]
 	assert "A menu was open." in text and vision.NO_CHANGE in text
+
+
+def test_localize_appends_language_instruction_for_non_english():
+	assert vision._localize("Describe.", "tl") == "Describe. Respond in Tagalog."
+	assert vision._localize("Describe.", "en") == "Describe."
+	assert vision._localize("Describe.", "xx") == "Describe."
+
+
+def test_describe_image_threads_language_into_prompt():
+	captured = {}
+
+	@contextmanager
+	def opener(request, timeout=None):
+		captured["body"] = json.loads(request.data.decode("utf-8"))
+
+		class _Resp:
+			def read(self_inner):
+				return json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode("utf-8")
+
+		yield _Resp()
+
+	vision.describe_image(b"img", "key", language="tl", _opener=opener)
+	text = captured["body"]["messages"][0]["content"][0]["text"]
+	assert "Respond in Tagalog." in text
