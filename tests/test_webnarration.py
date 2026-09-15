@@ -31,7 +31,7 @@ class FakeVision:
 		self.calls = []
 		self._replies = list(replies) if replies else None
 
-	def describe_changes(self, before, after, api_key, previous=None):
+	def describe_changes(self, before, after, api_key, previous=None, language="en"):
 		self.calls.append((before, after, api_key, previous))
 		if self._replies:
 			return self._replies.pop(0)
@@ -41,7 +41,7 @@ class FakeVision:
 class RaisingVision:
 	NO_CHANGE = "NO_CHANGE"
 
-	def describe_changes(self, before, after, api_key, previous=None):
+	def describe_changes(self, before, after, api_key, previous=None, language="en"):
 		raise RuntimeError("boom")
 
 
@@ -168,3 +168,24 @@ def test_passes_last_description_as_previous():
 	assert vis.calls[0][3] is None
 	assert vis.calls[1][3] == "A video is playing."
 	assert spoken == ["A video is playing.", "The video stopped."]
+
+
+def test_passes_language_to_describe_changes():
+	captured = {}
+
+	class LangVision:
+		NO_CHANGE = "NO_CHANGE"
+
+		def describe_changes(self, before, after, api_key, previous=None, language="en"):
+			captured["language"] = language
+			return "x"
+
+	spoken = []
+	cap = FakeCapture("Site - Google Chrome", [b"t1", b"t2"], [b"f1", b"f2"], True)
+	n = webnarration.WebNarrator(
+		cap, LangVision(), lambda: "key", lambda t: spoken.append(t), get_language=lambda: "tl", interval=3600
+	)
+	n._active = True
+	n._check_once()  # baseline
+	n._check_once()  # change -> describe_changes called with the language
+	assert captured["language"] == "tl"

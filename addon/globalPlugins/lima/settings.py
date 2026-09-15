@@ -21,6 +21,7 @@ CONFIG_SECTION = "lima"
 
 CONFIG_SPEC = {
 	"welcomeShown": "boolean(default=false)",
+	"language": 'string(default="en")',
 	"webNarrationIntervalSeconds": "float(default=6.0)",
 	"webNarrationChangeThreshold": "float(default=0.03)",
 	"webNarrationPreAnnounce": 'string(default="speech")',
@@ -82,6 +83,10 @@ def get_web_narration_interval():
 
 def get_web_narration_threshold():
 	return config.conf[CONFIG_SECTION]["webNarrationChangeThreshold"]
+
+
+def get_language():
+	return config.conf[CONFIG_SECTION]["language"]
 
 
 def is_welcome_shown():
@@ -153,6 +158,18 @@ class LimaSettingsPanel(SettingsPanel):
 		helper = gui.guiHelper.BoxSizerHelper(self, sizer=settingsSizer)
 		# The AI service is reached by signing in with Google — there is no API key to
 		# enter. Calls are proxied through the LIMA backend using the Firebase token.
+
+		# Language the AI replies in. The values map to the choices below, in order.
+		self._languageValues = ["en", "tl"]
+		self.languageChoice = helper.addLabeledControl(
+			# Translators: label for the response-language choice.
+			_("Language:"),
+			wx.Choice,
+			# Translators: the language options, in the order of _languageValues.
+			choices=[_("English"), _("Tagalog")],
+		)
+		lang = config.conf[CONFIG_SECTION]["language"]
+		self.languageChoice.SetSelection(self._languageValues.index(lang) if lang in self._languageValues else 0)
 
 		# Translators: label of the Google account group in LIMA AI settings.
 		accountSizer = wx.StaticBoxSizer(wx.StaticBox(self, label=_("Google account")), wx.VERTICAL)
@@ -244,5 +261,6 @@ class LimaSettingsPanel(SettingsPanel):
 		gui.messageBox(self._SIGN_IN_ERRORS.get(code, self._SIGN_IN_ERRORS["auth_error"]), _("LIMA AI"), wx.OK | wx.ICON_ERROR)
 
 	def onSave(self):
-		# Sign-in state is saved by the sign-in flow itself; persist the web-narration option.
+		# Sign-in state is saved by the sign-in flow itself; persist the chosen options.
+		config.conf[CONFIG_SECTION]["language"] = self._languageValues[self.languageChoice.GetSelection()]
 		config.conf[CONFIG_SECTION]["webNarrationPreAnnounce"] = self._preAnnounceValues[self.preAnnounceChoice.GetSelection()]
