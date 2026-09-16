@@ -27,14 +27,14 @@ addon_info = AddonInfo(
 		"press a shortcut and NVDA speaks a brief AI description of the active monitor."
 	),
 	# version
-	addon_version="0.2.1",
+	addon_version="0.3.0",
 	# Brief changelog for this version
 	# Translators: what's new content for the add-on version to be shown in the add-on store
-	addon_changelog=_("Default shortcuts moved to the NVDA+Alt layer so they no longer override NVDA's built-in commands; all commands remain reassignable in Input Gestures."),
+	addon_changelog=_("New Language setting to reply in English or Tagalog; the shortcuts are announced on first run; web narration pre-announcements are customizable (speak, sound, or off) and repeat less during videos."),
 	# Author(s)
 	addon_author="Roscommon Systems",
 	# URL for the add-on documentation support
-	addon_url="https://github.com/roscommonsystems/lima-ai-nvda-addon",
+	addon_url="https://www.roscommon.systems/",
 	# URL for the add-on repository where the source code can be found
 	addon_sourceURL="https://github.com/roscommonsystems/lima-ai-nvda-addon",
 	# Documentation file name
