@@ -75,52 +75,22 @@ def test_frames_differ_small_change_below_threshold_is_false():
 def test_frames_differ_mismatched_length_is_true():
 	assert capture.frames_differ(bytes([0]) * 10, bytes([0]) * 20, 0.03) is True
 
-V100 =  100
-V50 =  50
-V30 =  30
-V94 =  94
-V62 =  62
-V42 =  42
-V6 =  6
-V0 =  0
-V1920 =  1920
-V1080 =  1080
-V56 =  56
-V5000 =  5000
-V10 =  10
-V20 =  20
-
-
-def T4(a,b,c,d):
-	return (a,b,c,d)
-
-
-R1 = T4(V100,V100,V50,V30)
-R2 = T4(V94,V94,V62,V42)
-R3 = T4(V0 - V50,V0 - V50,V100,V100)
-R4 = T4(V5000,V5000,V10,V10)
-R5 = T4(V10,V10,V0,V20)
-R8 = T4(V0,V0,V56,V56)
-B0 = T4(V0,V0,V1920,V1080)
-R7 = T4(V5000,V5000,V50,V50)
-
-
 def test_expand_and_clamp_adds_padding_and_clips_to_bounds():
-	assert capture._expand_and_clamp(R1,V6,B0) == R2
+	assert capture._expand_and_clamp((100, 100, 50, 30), 6, (0, 0, 1920, 1080)) == (94, 94, 62, 42)
 
 
 def test_expand_and_clamp_clips_partially_visible_rect():
-	assert capture._expand_and_clamp(R3,V6,B0) == R8
+	assert capture._expand_and_clamp((-50, -50, 100, 100), 6, (0, 0, 1920, 1080)) == (0, 0, 56, 56)
 
 
 def test_expand_and_clamp_fully_outside_returns_none():
-	assert capture._expand_and_clamp(R4,V6,B0) is None
+	assert capture._expand_and_clamp((5000, 5000, 10, 10), 6, (0, 0, 1920, 1080)) is None
 
 
 def test_expand_and_clamp_zero_sized_rect_is_none():
-	assert capture._expand_and_clamp(R5,V6,B0) is None
+	assert capture._expand_and_clamp((10, 10, 0, 20), 6, (0, 0, 1920, 1080)) is None
 
 
 def test_capture_element_png_returns_none_when_off_active_monitor(monkeypatch):
-	monkeypatch.setattr(capture, "_active_monitor_geometry", lambda: (V0,V0,V1920,V1080))
-	assert capture.capture_element_png(R7) is None
+	monkeypatch.setattr(capture, "_active_monitor_geometry", lambda: (0, 0, 1920, 1080))
+	assert capture.capture_element_png((5000, 5000, 50, 50)) is None
