@@ -46,7 +46,7 @@ def test_select_active_geometry_boundary_belongs_to_second_monitor():
 def test_is_browser_title_true_for_browsers():
 	assert capture.is_browser_title("Downloads - Google Chrome")
 	assert capture.is_browser_title("Mozilla Firefox")
-	assert capture.is_browser_title("Qt | Cross-platform software design - Microsoft​ Edge")
+	assert capture.is_browser_title("Qt | Cross-platform software design - Microsoft Edge")
 
 
 def test_is_browser_title_false_for_non_browsers_and_empty():
@@ -74,3 +74,23 @@ def test_frames_differ_small_change_below_threshold_is_false():
 
 def test_frames_differ_mismatched_length_is_true():
 	assert capture.frames_differ(bytes([0]) * 10, bytes([0]) * 20, 0.03) is True
+
+def test_expand_and_clamp_adds_padding_and_clips_to_bounds():
+	assert capture._expand_and_clamp((100, 100, 50, 30), 6, (0, 0, 1920, 1080)) == (94, 94, 62, 42)
+
+
+def test_expand_and_clamp_clips_partially_visible_rect():
+	assert capture._expand_and_clamp((-50, -50, 100, 100), 6, (0, 0, 1920, 1080)) == (0, 0, 56, 56)
+
+
+def test_expand_and_clamp_fully_outside_returns_none():
+	assert capture._expand_and_clamp((5000, 5000, 10, 10), 6, (0, 0, 1920, 1080)) is None
+
+
+def test_expand_and_clamp_zero_sized_rect_is_none():
+	assert capture._expand_and_clamp((10, 10, 0, 20), 6, (0, 0, 1920, 1080)) is None
+
+
+def test_capture_element_png_returns_none_when_off_active_monitor(monkeypatch):
+	monkeypatch.setattr(capture, "_active_monitor_geometry", lambda: (0, 0, 1920, 1080))
+	assert capture.capture_element_png((5000, 5000, 50, 50)) is None

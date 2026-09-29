@@ -226,3 +226,39 @@ def test_describe_image_threads_language_into_prompt():
 	vision.describe_image(b"img", "key", language="tl", _opener=opener)
 	text = captured["body"]["messages"][0]["content"][0]["text"]
 	assert "Respond in Tagalog." in text
+
+
+def test_element_prompt_includes_a11y_text():
+	p = vision.element_prompt("Role: button\nName: Save")
+	assert "Accessibility information:" in p
+	assert "Role: button\nName: Save" in p
+	assert p.startswith(vision.ELEMENT_PROMPT)
+
+
+def test_describe_element_success_returns_text():
+	raw = json.dumps({"choices": [{"message": {"content": "A blue button."}}]}).encode("utf-8")
+	text = vision.describe_element(b"img", "Role: button", "key", _opener=_fake_opener(raw_bytes=raw))
+	assert text == "A blue button."
+
+
+def test_describe_element_threads_language_and_a11y_text_into_prompt():
+	captured = {}
+	@contextmanager
+	def opener(request, timeout=None):
+		captured["body"] = json.loads(request.data.decode("utf-8"))
+		class _Resp:
+			def read(self_inner):
+				return json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode("utf-8")
+		yield _Resp()
+	vision.describe_element(b"img", "Role: checkbox", "key", language="tl", _opener=opener)
+	text = captured["body"]["messages"][0]["content"][0]["text"]
+	assert "Role: checkbox" in text
+	assert "Respond in Tagalog." in text
+
+
+def test_describe_element_raises_network_code():
+	import urllib.error
+	opener = _fake_opener(raise_exc=urllib.error.URLError("down"))
+	with pytest.raises(vision.VisionError)as exc:
+		vision.describe_element(b"img", "Role: button", "key", _opener=opener)
+	assert exc.value.code == "network"
