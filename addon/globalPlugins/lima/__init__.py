@@ -13,6 +13,8 @@ from speech.priorities import Spri
 from speech.commands import LangChangeCommand
 import addonHandler
 import braille
+import api
+import textInfos
 import config
 import core
 import tones
@@ -68,6 +70,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				# Translators: one-time spoken introduction naming the add-on's shortcuts.
 				_(
 					"Welcome to LIMA AI. To describe your screen press NVDA+Alt+D, "
+					"to describe the focused element press NVDA+Alt+E, "
 					"and to toggle web narration press NVDA+Alt+W. "
 					"You can change these shortcuts in NVDA's Input Gestures."
 				),
@@ -87,20 +90,23 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			# Translators: spoken when the user is not signed in.
 			"signed_out": _("Sign in with Google in LIMA AI settings to use this feature."),
 			# Translators: spoken when a description is already in progress.
-			"busy": _("Still describing the previous screen, please wait."),
+			"busy": _("Still describing, please wait."),
 			# Translators: spoken when the screen could not be captured.
-			"capture": _("Could not capture the screen."),
+			"capture": _("Could not capture the screen or element."),
 			# Translators: spoken when the AI service cannot be reached.
 			"network": _("Could not reach the AI service. Check your connection and try again."),
 			# Translators: spoken when the AI service returns an error.
 			"api_error": _("The AI service returned an error. Please try again."),
 			# Translators: spoken when the AI returns no usable description.
 			"empty": _("No description was returned. Try again."),
+			# Translators: spoken when the focused element has no visible location to capture.
+			"focus": _("The focused element has no visible location to capture. Move to a control and try again."),
 		}
 		return messages.get(code, messages["api_error"])
 
-	# Default gestures use the NVDA+Alt layer, which NVDA core leaves free apart from the
-	# braille auto-scroll keys (J/K/L). We deliberately avoid NVDA+Shift+D and similar,
+	# Default gestures use the NVDA+Alt layer (D: describe screen, E: describe focused element, W:
+	# web narration)., which NVDA core leaves free apart from the braille auto-scroll keys
+	# (J/K/L). We deliberately avoid NVDA+Shift+D and similar,
 	# because those already map to NVDA commands (NVDA+Shift+D is the audio-ducking toggle).
 	# The minor "announce running" health check ships unbound. Every command has a
 	# description and scriptCategory, so all of them appear in NVDA's Input Gestures dialog
@@ -156,6 +162,150 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			self._describing = False
 		# NVDA speech must run on the main thread.
 		queueHandler.queueFunction(queueHandler.eventQueue, self._speak_localized, message, locale, Spri.NORMAL, True)
+
+	@script(
+		# Translators: Description of the command that describes the currently focused element.
+		description=_("Describe the currently focused element."),
+		gesture="kb:NVDA+alt+e",
+	)
+	def script_describeElement(self, gesture):
+		id_token = settings.get_id_token()
+		if not id_token:
+			ui.message(self._error_message("signed_out"))
+			return
+		if self._describing:
+			ui.message(self._error_message("busy"))
+			return
+		obj = self._element_target()
+		if obj is None:
+			ui.message(self._error_message("focus"))
+			return
+		context = self._element_context(obj)
+		self._describing = True
+		# Translators: Spoken immediately when an element-description request starts.
+		ui.message(_("Describing element."))
+		try:
+			location = getattr(obj, "location", None)
+			if not location:
+				raise ValueError
+			png = capture.capture_element_png(
+				(location.left, location.top, location.width, location.height)
+			)
+			if png is None:
+				raise ValueError
+		except ValueError:
+				self._describing = False
+				ui.message(self._error_message("focus"))
+				return
+		except Exception:
+				self._describing = False
+				ui.message(self._error_message("capture"))
+				return
+		thread = threading.Thread(
+			target=self._run_describe_element, args=(png, context, id_token), daemon=True
+		)
+		thread.start()
+
+	def _run_describe_element(self, png, context, id_token):
+		message = self._error_message("api_error")
+		locale = None
+		try:
+			message = vision.describe_element(png, context, id_token, language=settings.get_language())
+			# A successful description is in the selected reply language;the error messages
+			# above stay in the interface language, so only tag the language on success.
+			locale = _SPEECH_LOCALES.get(settings.get_language())
+		except vision.VisionError as e:
+			message = self._error_message(e.code)
+		except Exception:
+			pass  # keep the default api_error message
+		finally:
+			self._describing = False
+		# NVDA speech must run on the main thread.
+		queueHandler.queueFunction(queueHandler.eventQueue, self._speak_localized, message, locale, Spri.NORMAL, True)
+
+	def _element_target(self):
+		"""Best-effort: the real focused (possibly virtual) element, drilling into
+		browse-mode documents so the actual focused element is captured, not the whole
+		document."""
+		try:
+			focus = api.getFocusObject()
+		except Exception:
+			return None
+		if not focus:
+			return None
+		obj = focus
+		try:
+			ti = focus.treeInterceptor
+		except Exception:
+			ti = None
+		if ti is not None:
+			try:
+				cand = ti.makeTextInfo(textInfos.POSITION_CARET).focusableNVDAObjectAtStart
+			except Exception:
+				cand = None
+			if cand is not None and self._has_visible_location(cand):
+				obj = cand
+		return obj
+
+	def _has_visible_location(self, obj):
+		location = getattr(obj, "location", None)
+		return bool(location and getattr(location, "width", 0) > 0 and getattr(location, "height", 0) > 0)
+
+	def _element_context(self, obj):
+		"""Compact accessibility-tree description of the focused element, for extra context
+		alongside the image crop: name, role, states, value, keyboard shortcut, description,
+		and up to 3 ancestors (e.g. the dialog or toolbar containing the element)."""
+		parts = []
+		if obj is None:
+			return ""
+		def add(label, value):
+			if isinstance(value, str):
+				value = self._clip(value)
+			if value:
+				parts.append(f"{label}: {value}")
+		role = getattr(obj, "role", None)
+		if role is not None:
+			role = getattr(role, "displayString", None) or getattr(role, "displayName", None) or role
+		if role:
+			add("Role", str(role))
+		add("Name", getattr(obj, "name", None))
+		value = getattr(obj, "value", None)
+		name = getattr(obj, "name", None)
+		if value is not None and (not isinstance(value, str) or value != name):
+			add("Value", value)
+		add("Keyboard shortcut", getattr(obj, "keyboardShortcut", None))
+		add("Description", getattr(obj, "description", None))
+		states = getattr(obj, "states", None)
+		if states:
+			labels = []
+			for state in sorted(states, key=str):
+				labels.append(getattr(state, "displayString", None) or getattr(state, "displayName", None) or str(state))
+			if labels:
+				add("States", ", ".join(labels))
+		context = []
+		parent = getattr(obj, "parent", None)
+		for _ in range(3):
+			if parent is None:
+				break
+			pname = getattr(parent, "name", None)
+			prole = getattr(parent, "role", None)
+			if prole is not None:
+				prole = getattr(prole, "displayString", None) or getattr(prole, "displayName", None) or prole
+			label = str(prole if prole else "object")
+			if pname:
+				label += f" '{self._clip(pname)}'"
+			context.append(label)
+			parent = getattr(parent, "parent", None)
+		if context:
+			add("Inside", ", ".join(context))
+		return "\n".join(parts)
+
+	def _clip(self, value, limit=120):
+		"""Truncate long accessible strings so the prompt stays compact."""
+		value = value.strip()
+		if len(value) > limit:
+			return value[: limit - 1] + "..."
+		return value
 
 	def _speak_queued(self, text):
 		# Runs on the web-narration timer thread. Everything is queued at NEXT priority so it

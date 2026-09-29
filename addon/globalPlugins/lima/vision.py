@@ -26,6 +26,16 @@ DEFAULT_PROMPT = (
 	"Do not narrate, interpret, tell a story, or describe moment-to-moment changes."
 )
 
+ELEMENT_PROMPT = (
+	"A blind user has focused a UI element with the Tab key. The element's "
+	"accessibility information is given below, and the image shows the element "
+	"cropped from the screen, with a little surrounding context. In one or two "
+	"short, factual sentences, describe the element's visual appearance that the "
+	"accessibility information cannot convey, such as its size, shape, colors, "
+	"icons, or how it sits relative to surrounding content. Do not restate the "
+	"accessibility information or narrate a story."
+)
+
 MAX_TOKENS = 150
 
 CHANGES_PROMPT = (
@@ -176,8 +186,25 @@ def describe_image(image_png_bytes, id_token, model=OPENROUTER_VISION_MODEL, pro
 	return _post_and_parse(payload, id_token, timeout, _opener)
 
 
+def element_prompt(a11y_text):
+	"""Compose the prompt for describing a focused UI element, embedding its
+	accessibility-tree information for the vision model."""
+	return (
+		ELEMENT_PROMPT
+		+ "\n\nAccessibility information:\n"
+		+ a11y_text
+	)
+
+
+def describe_element(image_png_bytes, a11y_text, id_token, model=OPENROUTER_VISION_MODEL, max_tokens=MAX_TOKENS, timeout=30, language="en", _opener=None):
+	"""POST a crop of a focused UI element (plus its accessibility information)
+	through the LIMA backend; return the description text."""
+	payload = build_payload(image_png_bytes, model, _localize(element_prompt(a11y_text), language), max_tokens)
+	return _post_and_parse(payload, id_token, timeout,_opener)
+
+
 def build_changes_payload(before_png, after_png, model=OPENROUTER_VISION_MODEL, prompt=CHANGES_PROMPT, max_tokens=MAX_TOKENS):
-	"""OpenAI-format body carrying two PNG images (before, after)."""
+	"""OpenAI-format body carrying two PNG images(before, after)."""
 	before_url = "data:image/png;base64," + base64.b64encode(before_png).decode("ascii")
 	after_url = "data:image/png;base64," + base64.b64encode(after_png).decode("ascii")
 	return {
