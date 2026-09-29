@@ -105,7 +105,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		return messages.get(code, messages["api_error"])
 
 	# Default gestures use the NVDA+Alt layer (D: describe screen, E: describe focused element, W:
-	# web narration)., which NVDA core leaves free apart from the braille auto-scroll keys
+	# web narration), which NVDA core leaves free apart from the braille auto-scroll keys
 	# (J/K/L). We deliberately avoid NVDA+Shift+D and similar,
 	# because those already map to NVDA commands (NVDA+Shift+D is the audio-ducking toggle).
 	# The minor "announce running" health check ships unbound. Every command has a

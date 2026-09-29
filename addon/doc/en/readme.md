@@ -6,7 +6,7 @@ LIMA AI is the NVDA screen-reader add-on for LIMA (Low-Vision Intelligent Machin
 
 - **NVDA+Alt+D** — Describe the current screen. Captures the active monitor, sends it to a vision AI, and NVDA speaks a brief factual description.
 - **NVDA+Alt+E** — Describe the currently focused element. Captures the focused element's bounding box plus its accessibility information from the tree and sends both to the vision AI.
-- **NVDA+Alt+W** — Toggle dynamic web narration. While on and a browser is focused, NVDA briefly describes changes on the page ("Web page update: …") without interrupting what you are reading,,and does not repeat itself.
+- **NVDA+Alt+W** — Toggle dynamic web narration. While on and a browser is focused, NVDA briefly describes changes on the page ("Web page update: …") without interrupting what you are reading, and does not repeat itself.
 - **Announce that the add-on is running** (health check) — no default shortcut; assign one if you want.
 
 The default shortcuts use the `NVDA+Alt` layer so they do not override any built-in NVDA command. You can change or add shortcuts in NVDA menu → Preferences → Input Gestures, under the **LIMA AI** category.
