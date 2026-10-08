@@ -64,7 +64,7 @@ def changes_prompt(previous=None):
 
 # Response language. English uses the base prompts as-is; other languages get an explicit
 # instruction appended so the model replies in that language.
-LANGUAGE_NAMES = {"tl": "Tagalog"}
+LANGUAGE_NAMES = {"tl": "Tagalog", "vi": "Vietnamese"}
 
 
 def _localize(prompt, language):
@@ -95,7 +95,7 @@ VISION_PROVIDER = {
 class VisionError(Exception):
 	"""A failure with a stable code the caller maps to a spoken message.
 
-	code is one of: "api_error", "network", "empty".
+	code is one of: "api_error", "rate_limited", "network", "empty".
 	"""
 
 	def __init__(self, code):
@@ -168,7 +168,7 @@ def _post_and_parse(payload, id_token, timeout, _opener):
 		except Exception:
 			pass
 		log.error("LIMA AI vision HTTP error %s: %s", getattr(e, "code", "?"), detail)
-		raise VisionError("api_error") from e
+		raise VisionError("rate_limited" if e.code == 429 else "api_error") from e
 	except (urllib.error.URLError, TimeoutError, OSError) as e:
 		log.error("LIMA AI vision could not reach the AI service: %r", e)
 		raise VisionError("network") from e

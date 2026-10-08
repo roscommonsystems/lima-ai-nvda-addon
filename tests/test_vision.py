@@ -88,6 +88,14 @@ def test_describe_image_http_error_raises_api_error():
 	assert exc.value.code == "api_error"
 
 
+def test_http_429_is_reported_as_rate_limited():
+	import urllib.error
+	error = urllib.error.HTTPError("https://backend.test", 429, "Too Many Requests", {}, None)
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_changes(b"before", b"after", "token", language="vi", _opener=_fake_opener(raise_exc=error))
+	assert exc.value.code == "rate_limited"
+
+
 def test_describe_image_logs_the_real_error_on_network_failure(caplog):
 	import urllib.error
 	opener = _fake_opener(raise_exc=urllib.error.URLError("boom-detail"))
@@ -206,11 +214,13 @@ def test_describe_changes_threads_previous_into_the_prompt():
 
 def test_localize_appends_language_instruction_for_non_english():
 	assert vision._localize("Describe.", "tl") == "Describe. Respond in Tagalog."
+	assert vision._localize("Describe.", "vi") == "Describe. Respond in Vietnamese."
 	assert vision._localize("Describe.", "en") == "Describe."
 	assert vision._localize("Describe.", "xx") == "Describe."
 
 
-def test_describe_image_threads_language_into_prompt():
+@pytest.mark.parametrize("language, name", [("tl", "Tagalog"), ("vi", "Vietnamese")])
+def test_describe_image_threads_language_into_prompt(language, name):
 	captured = {}
 
 	@contextmanager
@@ -223,9 +233,9 @@ def test_describe_image_threads_language_into_prompt():
 
 		yield _Resp()
 
-	vision.describe_image(b"img", "key", language="tl", _opener=opener)
+	vision.describe_image(b"img", "key", language=language, _opener=opener)
 	text = captured["body"]["messages"][0]["content"][0]["text"]
-	assert "Respond in Tagalog." in text
+	assert f"Respond in {name}." in text
 
 
 def test_element_prompt_includes_a11y_text():
@@ -235,13 +245,37 @@ def test_element_prompt_includes_a11y_text():
 	assert p.startswith(vision.ELEMENT_PROMPT)
 
 
+def test_describe_changes_in_vietnamese_preserves_text_and_no_change_instruction():
+	captured = {}
+	description = "Một hộp thoại mới xuất hiện."
+
+	@contextmanager
+	def opener(request, timeout=None):
+		captured["body"] = json.loads(request.data.decode("utf-8"))
+
+		class _Resp:
+			def read(self_inner):
+				return json.dumps({"choices": [{"message": {"content": description}}]}, ensure_ascii=False).encode("utf-8")
+
+		yield _Resp()
+
+	previous = "Trang hiển thị một biểu mẫu."
+	result = vision.describe_changes(b"before", b"after", "key", previous=previous, language="vi", _opener=opener)
+	prompt = captured["body"]["messages"][0]["content"][0]["text"]
+	assert "Respond in Vietnamese." in prompt
+	assert previous in prompt
+	assert "reply with exactly NO_CHANGE" in prompt
+	assert result == description
+
+
 def test_describe_element_success_returns_text():
 	raw = json.dumps({"choices": [{"message": {"content": "A blue button."}}]}).encode("utf-8")
 	text = vision.describe_element(b"img", "Role: button", "key", _opener=_fake_opener(raw_bytes=raw))
 	assert text == "A blue button."
 
 
-def test_describe_element_threads_language_and_a11y_text_into_prompt():
+@pytest.mark.parametrize("language, name", [("tl", "Tagalog"), ("vi", "Vietnamese")])
+def test_describe_element_threads_language_and_a11y_text_into_prompt(language, name):
 	captured = {}
 	@contextmanager
 	def opener(request, timeout=None):
@@ -250,10 +284,10 @@ def test_describe_element_threads_language_and_a11y_text_into_prompt():
 			def read(self_inner):
 				return json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode("utf-8")
 		yield _Resp()
-	vision.describe_element(b"img", "Role: checkbox", "key", language="tl", _opener=opener)
+	vision.describe_element(b"img", "Role: checkbox", "key", language=language, _opener=opener)
 	text = captured["body"]["messages"][0]["content"][0]["text"]
 	assert "Role: checkbox" in text
-	assert "Respond in Tagalog." in text
+	assert f"Respond in {name}." in text
 
 
 def test_describe_element_raises_network_code():

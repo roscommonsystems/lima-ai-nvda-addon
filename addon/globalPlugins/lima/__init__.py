@@ -25,6 +25,7 @@ from . import vision
 from . import settings
 from . import webnarration
 from . import firebase_config
+from . import announcements
 
 addonHandler.initTranslation()
 
@@ -32,7 +33,7 @@ addonHandler.initTranslation()
 # Maps a selected reply language to the NVDA/synth locale, so a non-English reply is spoken
 # with that language's voice (needs a synth that supports it, e.g. eSpeak NG has Filipino).
 # English is absent: the reply is already in the default voice's language.
-_SPEECH_LOCALES = {"tl": "fil"}
+_SPEECH_LOCALES = {"tl": "fil", "vi": "vi"}
 
 
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
@@ -58,6 +59,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			get_language=settings.get_language,
 			interval=settings.get_web_narration_interval(),
 			change_threshold=settings.get_web_narration_threshold(),
+			on_error=self._narration_error,
 		)
 		# On first run, announce the add-on and its default shortcuts so users learn how to
 		# use it without hunting through Input Gestures. Deferred a few seconds so it does not
@@ -84,23 +86,38 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			pass
 		super().terminate()
 
+	def _status_text(self, message):
+		return announcements.status_text(message, settings.get_language(), _)
+
+	def _narration_error(self, code):
+		queueHandler.queueFunction(queueHandler.eventQueue, self._announce_status, self._error_message(code), Spri.NEXT)
+
+	def _announce_status(self, text, priority=Spri.NORMAL, show_in_braille=True):
+		if settings.get_language() == "vi":
+			self._speak_localized(text, "vi", priority, show_in_braille)
+		elif show_in_braille:
+			ui.message(text)
+		else:
+			speech.speakMessage(text, priority)
+
 	# Spoken messages for each failure code (kept here so vision.py stays NVDA-free).
 	def _error_message(self, code):
 		messages = {
+			"rate_limited": self._status_text("The AI service is temporarily busy. Please try again later."),
 			# Translators: spoken when the user is not signed in.
-			"signed_out": _("Sign in with Google in LIMA AI settings to use this feature."),
+			"signed_out": self._status_text("Sign in with Google in LIMA AI settings to use this feature."),
 			# Translators: spoken when a description is already in progress.
-			"busy": _("Still describing, please wait."),
+			"busy": self._status_text("Still describing, please wait."),
 			# Translators: spoken when the screen could not be captured.
-			"capture": _("Could not capture the screen or element."),
+			"capture": self._status_text("Could not capture the screen or element."),
 			# Translators: spoken when the AI service cannot be reached.
-			"network": _("Could not reach the AI service. Check your connection and try again."),
+			"network": self._status_text("Could not reach the AI service. Check your connection and try again."),
 			# Translators: spoken when the AI service returns an error.
-			"api_error": _("The AI service returned an error. Please try again."),
+			"api_error": self._status_text("The AI service returned an error. Please try again."),
 			# Translators: spoken when the AI returns no usable description.
-			"empty": _("No description was returned. Try again."),
+			"empty": self._status_text("No description was returned. Try again."),
 			# Translators: spoken when the focused element has no visible location to capture.
-			"focus": _("The focused element has no visible location to capture. Move to a control and try again."),
+			"focus": self._status_text("The focused element has no visible location to capture. Move to a control and try again."),
 		}
 		return messages.get(code, messages["api_error"])
 
@@ -117,7 +134,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	)
 	def script_announceRunning(self, gesture):
 		# Translators: Spoken message confirming the add-on is active.
-		ui.message(_("LIMA AI add-on is running"))
+		self._announce_status(self._status_text("LIMA AI add-on is running"))
 
 	@script(
 		# Translators: Description of the describe-screen command.
@@ -127,19 +144,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def script_describeScreen(self, gesture):
 		id_token = settings.get_id_token()
 		if not id_token:
-			ui.message(self._error_message("signed_out"))
+			self._announce_status(self._error_message("signed_out"))
 			return
 		if self._describing:
-			ui.message(self._error_message("busy"))
+			self._announce_status(self._error_message("busy"))
 			return
 		self._describing = True
 		# Translators: spoken immediately when a description request starts.
-		ui.message(_("Describing screen."))
+		self._announce_status(self._status_text("Describing screen."))
 		try:
 			png = capture.capture_screen_png()
 		except Exception:
 			self._describing = False
-			ui.message(self._error_message("capture"))
+			self._announce_status(self._error_message("capture"))
 			return
 		thread = threading.Thread(
 			target=self._run_describe, args=(png, id_token), daemon=True
@@ -148,11 +165,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def _run_describe(self, png, id_token):
 		message = self._error_message("api_error")
-		locale = None
+		locale = "vi" if settings.get_language() == "vi" else None
 		try:
 			message = vision.describe_image(png, id_token, language=settings.get_language())
-			# A successful description is in the selected reply language; the error messages
-			# above stay in the interface language, so only tag the language on success.
 			locale = _SPEECH_LOCALES.get(settings.get_language())
 		except vision.VisionError as e:
 			message = self._error_message(e.code)
@@ -171,19 +186,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def script_describeElement(self, gesture):
 		id_token = settings.get_id_token()
 		if not id_token:
-			ui.message(self._error_message("signed_out"))
+			self._announce_status(self._error_message("signed_out"))
 			return
 		if self._describing:
-			ui.message(self._error_message("busy"))
+			self._announce_status(self._error_message("busy"))
 			return
 		obj = self._element_target()
 		if obj is None:
-			ui.message(self._error_message("focus"))
+			self._announce_status(self._error_message("focus"))
 			return
 		context = self._element_context(obj)
 		self._describing = True
 		# Translators: Spoken immediately when an element-description request starts.
-		ui.message(_("Describing element."))
+		self._announce_status(self._status_text("Describing element."))
 		try:
 			location = getattr(obj, "location", None)
 			if not location:
@@ -195,11 +210,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				raise ValueError
 		except ValueError:
 				self._describing = False
-				ui.message(self._error_message("focus"))
+				self._announce_status(self._error_message("focus"))
 				return
 		except Exception:
 				self._describing = False
-				ui.message(self._error_message("capture"))
+				self._announce_status(self._error_message("capture"))
 				return
 		thread = threading.Thread(
 			target=self._run_describe_element, args=(png, context, id_token), daemon=True
@@ -208,11 +223,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def _run_describe_element(self, png, context, id_token):
 		message = self._error_message("api_error")
-		locale = None
+		locale = "vi" if settings.get_language() == "vi" else None
 		try:
 			message = vision.describe_element(png, context, id_token, language=settings.get_language())
-			# A successful description is in the selected reply language;the error messages
-			# above stay in the interface language, so only tag the language on success.
 			locale = _SPEECH_LOCALES.get(settings.get_language())
 		except vision.VisionError as e:
 			message = self._error_message(e.code)
@@ -322,7 +335,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			mode = section["webNarrationPreAnnounce"]
 			if mode == "speech":
 				# Translators: spoken before each web-narration update.
-				queueHandler.queueFunction(queueHandler.eventQueue, speech.speakMessage, _("Web page update:"), Spri.NEXT)
+				queueHandler.queueFunction(queueHandler.eventQueue, self._announce_status, self._status_text("Web page update:"), Spri.NEXT, False)
 			elif mode == "sound":
 				queueHandler.queueFunction(queueHandler.eventQueue, tones.beep, 660, 80)
 		locale = _SPEECH_LOCALES.get(settings.get_language())
@@ -347,8 +360,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def script_toggleWebNarration(self, gesture):
 		# Stopping is always allowed; only starting requires being signed in.
 		if not self._web_narrator.is_active and not settings.get_id_token():
-			ui.message(self._error_message("signed_out"))
+			self._announce_status(self._error_message("signed_out"))
 			return
 		active = self._web_narrator.toggle()
 		# Translators: spoken when web narration is turned on or off.
-		ui.message(_("Web narration on") if active else _("Web narration off"))
+		self._announce_status(self._status_text("Web narration on") if active else self._status_text("Web narration off"))
