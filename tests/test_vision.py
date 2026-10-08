@@ -88,14 +88,6 @@ def test_describe_image_http_error_raises_api_error():
 	assert exc.value.code == "api_error"
 
 
-def test_http_429_is_reported_as_rate_limited():
-	import urllib.error
-	error = urllib.error.HTTPError("https://backend.test", 429, "Too Many Requests", {}, None)
-	with pytest.raises(vision.VisionError) as exc:
-		vision.describe_changes(b"before", b"after", "token", language="vi", _opener=_fake_opener(raise_exc=error))
-	assert exc.value.code == "rate_limited"
-
-
 def test_describe_image_logs_the_real_error_on_network_failure(caplog):
 	import urllib.error
 	opener = _fake_opener(raise_exc=urllib.error.URLError("boom-detail"))

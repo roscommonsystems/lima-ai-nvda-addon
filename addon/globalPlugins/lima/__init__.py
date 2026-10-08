@@ -59,7 +59,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			get_language=settings.get_language,
 			interval=settings.get_web_narration_interval(),
 			change_threshold=settings.get_web_narration_threshold(),
-			on_error=self._narration_error,
 		)
 		# On first run, announce the add-on and its default shortcuts so users learn how to
 		# use it without hunting through Input Gestures. Deferred a few seconds so it does not
@@ -89,9 +88,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def _status_text(self, message):
 		return announcements.status_text(message, settings.get_language(), _)
 
-	def _narration_error(self, code):
-		queueHandler.queueFunction(queueHandler.eventQueue, self._announce_status, self._error_message(code), Spri.NEXT)
-
 	def _announce_status(self, text, priority=Spri.NORMAL, show_in_braille=True):
 		if settings.get_language() == "vi":
 			self._speak_localized(text, "vi", priority, show_in_braille)
@@ -103,7 +99,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	# Spoken messages for each failure code (kept here so vision.py stays NVDA-free).
 	def _error_message(self, code):
 		messages = {
-			"rate_limited": self._status_text("The AI service is temporarily busy. Please try again later."),
 			# Translators: spoken when the user is not signed in.
 			"signed_out": self._status_text("Sign in with Google in LIMA AI settings to use this feature."),
 			# Translators: spoken when a description is already in progress.

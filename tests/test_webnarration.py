@@ -1,7 +1,6 @@
 import pytest
 
 import webnarration
-import vision
 
 
 class FakeCapture:
@@ -46,46 +45,6 @@ class RaisingVision:
 
 	def describe_changes(self, before, after, api_key, previous=None, language="en"):
 		raise RuntimeError("boom")
-
-
-def test_rate_limit_pauses_retries_reports_once_and_recovers(monkeypatch):
-	now = [0.0]
-	monkeypatch.setattr(webnarration.time, "monotonic", lambda: now[0])
-
-	class RateLimitedVision:
-		NO_CHANGE = "NO_CHANGE"
-
-		def __init__(self):
-			self.calls = []
-
-		def describe_changes(self, before, after, token, previous=None, language="en"):
-			self.calls.append((before, after, language))
-			if len(self.calls) < 3:
-				raise vision.VisionError("rate_limited")
-			return "Một hộp thoại mới xuất hiện."
-
-	cap = FakeCapture("Site - Google Chrome", [b"t1", b"t2", b"t3", b"t4"], [b"f1", b"f2", b"f3", b"f4"], True)
-	vis = RateLimitedVision()
-	errors, spoken = [], []
-	n = webnarration.WebNarrator(cap, vis, lambda: "token", spoken.append, get_language=lambda: "vi", on_error=errors.append)
-	n._active = True
-	n._check_once()  # Baseline.
-	n._check_once()  # First failure.
-	now[0] = 59.0
-	n._check_once()
-	assert len(vis.calls) == 1
-	now[0] = 60.0
-	n._check_once()  # Repeated failure, no repeated announcement.
-	now[0] = 179.0
-	n._check_once()
-	assert len(vis.calls) == 2
-	now[0] = 180.0
-	n._check_once()  # Provider recovers; retry compares against original baseline.
-	assert errors == ["rate_limited"]
-	assert vis.calls == [(b"f1", b"f2", "vi"), (b"f1", b"f3", "vi"), (b"f1", b"f4", "vi")]
-	assert spoken == ["Một hộp thoại mới xuất hiện."]
-	assert n._last_error is None
-	assert n._retry_delay == 0.0
 
 
 def _make(cap, vis, spoken):

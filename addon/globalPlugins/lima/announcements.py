@@ -2,7 +2,6 @@
 """Command announcements in the selected LIMA response language."""
 
 VIETNAMESE = {
-	"The AI service is temporarily busy. Please try again later.": "Dịch vụ AI hiện đang quá tải. Vui lòng thử lại sau.",
 	"LIMA AI add-on is running": "Tiện ích LIMA AI đang hoạt động.",
 	"Describing screen.": "Đang mô tả màn hình.",
 	"Describing element.": "Đang mô tả phần tử đang được chọn.",
