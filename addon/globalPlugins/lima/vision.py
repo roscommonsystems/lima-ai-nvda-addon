@@ -64,7 +64,7 @@ def changes_prompt(previous=None):
 
 # Response language. English uses the base prompts as-is; other languages get an explicit
 # instruction appended so the model replies in that language.
-LANGUAGE_NAMES = {"tl": "Tagalog"}
+LANGUAGE_NAMES = {"tl": "Tagalog", "vi": "Vietnamese"}
 
 
 def _localize(prompt, language):

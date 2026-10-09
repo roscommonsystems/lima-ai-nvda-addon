@@ -1,3 +1,5 @@
+import pytest
+
 import webnarration
 
 
@@ -170,7 +172,8 @@ def test_passes_last_description_as_previous():
 	assert spoken == ["A video is playing.", "The video stopped."]
 
 
-def test_passes_language_to_describe_changes():
+@pytest.mark.parametrize("language", ["tl", "vi"])
+def test_passes_language_to_describe_changes(language):
 	captured = {}
 
 	class LangVision:
@@ -183,9 +186,9 @@ def test_passes_language_to_describe_changes():
 	spoken = []
 	cap = FakeCapture("Site - Google Chrome", [b"t1", b"t2"], [b"f1", b"f2"], True)
 	n = webnarration.WebNarrator(
-		cap, LangVision(), lambda: "key", lambda t: spoken.append(t), get_language=lambda: "tl", interval=3600
+		cap, LangVision(), lambda: "key", lambda t: spoken.append(t), get_language=lambda: language, interval=3600
 	)
 	n._active = True
 	n._check_once()  # baseline
 	n._check_once()  # change -> describe_changes called with the language
-	assert captured["language"] == "tl"
+	assert captured["language"] == language

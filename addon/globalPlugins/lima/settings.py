@@ -160,13 +160,13 @@ class LimaSettingsPanel(SettingsPanel):
 		# enter. Calls are proxied through the LIMA backend using the Firebase token.
 
 		# Language the AI replies in. The values map to the choices below, in order.
-		self._languageValues = ["en", "tl"]
+		self._languageValues = ["en", "tl", "vi"]
 		self.languageChoice = helper.addLabeledControl(
 			# Translators: label for the response-language choice.
 			_("Language:"),
 			wx.Choice,
 			# Translators: the language options, in the order of _languageValues.
-			choices=[_("English"), _("Tagalog")],
+			choices=[_("English"), _("Tagalog"), _("Vietnamese")],
 		)
 		lang = config.conf[CONFIG_SECTION]["language"]
 		self.languageChoice.SetSelection(self._languageValues.index(lang) if lang in self._languageValues else 0)

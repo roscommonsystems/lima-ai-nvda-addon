@@ -15,9 +15,11 @@ Continuous narration and computer control remain exclusive to the LIMA desktop a
 
 ## Language
 
-LIMA AI can reply in **English** (default) or **Tagalog**, chosen in NVDA menu → Preferences → Settings → LIMA AI → **Language**. The reply is tagged with the chosen language so NVDA pronounces it with that language's voice.
+LIMA AI can reply in **English** (default), **Tagalog**, or **Vietnamese**, chosen in NVDA menu → Preferences → Settings → LIMA AI → **Language**. This applies to screen descriptions, focused-element descriptions, and web narration. The reply is tagged with the chosen language so NVDA pronounces it with that language's voice.
 
 For Tagalog, use a synthesizer that has a Filipino voice. NVDA's built-in **eSpeak NG** supports Filipino: set Settings → Speech → Synthesizer to eSpeak NG. If it sounds too fast, lower the Rate in the same panel and turn off "Rate boost". Windows OneCore voices do not include Filipino, so Tagalog is not pronounced correctly on those.
+
+For Vietnamese, use a synthesizer with a Vietnamese voice, such as **eSpeak NG**, and enable **Automatic language switching** in NVDA's Speech settings. When Vietnamese is selected, command announcements and errors also use Vietnamese, including "Describing screen" and "Web page update". Settings labels and the first-run welcome message follow NVDA's interface language.
 
 ## How it works
 
