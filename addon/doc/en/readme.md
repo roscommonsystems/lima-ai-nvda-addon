@@ -7,11 +7,12 @@ LIMA AI is the NVDA screen-reader add-on for LIMA (Low-Vision Intelligent Machin
 - **NVDA+Alt+D** — Describe the current screen. Captures the active monitor, sends it to a vision AI, and NVDA speaks a brief factual description.
 - **NVDA+Alt+E** — Describe the currently focused element. Captures the focused element's bounding box plus its accessibility information from the tree and sends both to the vision AI.
 - **NVDA+Alt+W** — Toggle dynamic web narration. While on and a browser is focused, NVDA briefly describes changes on the page ("Web page update: …") without interrupting what you are reading, and does not repeat itself.
+- **NVDA+Alt+C** — Click an element you describe. Type what you want to do in plain words ("click the Send button", "open the Downloads folder", "right-click the file"), and LIMA finds the control among the on-screen elements and performs the click. It chooses a single, double, or right click from your wording, and works on buttons, links, menu items, list items, and text fields such as search and address bars.
 - **Announce that the add-on is running** (health check) — no default shortcut; assign one if you want.
 
 The default shortcuts use the `NVDA+Alt` layer so they do not override any built-in NVDA command. You can change or add shortcuts in NVDA menu → Preferences → Input Gestures, under the **LIMA AI** category.
 
-Continuous narration and computer control remain exclusive to the LIMA desktop app.
+Continuous narration and hands-free computer control remain exclusive to the LIMA desktop app.
 
 ## Language
 
@@ -19,13 +20,17 @@ LIMA AI can reply in **English** (default) or **Tagalog**, chosen in NVDA menu �
 
 For Tagalog, use a synthesizer that has a Filipino voice. NVDA's built-in **eSpeak NG** supports Filipino: set Settings → Speech → Synthesizer to eSpeak NG. If it sounds too fast, lower the Rate in the same panel and turn off "Rate boost". Windows OneCore voices do not include Filipino, so Tagalog is not pronounced correctly on those.
 
+## Clicking elements
+
+Some controls are easiest to reach with a mouse. LIMA can click them for you: press **NVDA+Alt+C** and type what you want to do in plain words, for example "click the Send button", "open the Downloads folder", or "right-click the file". LIMA lists the on-screen controls from the accessibility tree, a vision AI picks the one you mean and whether it needs a single, double, or right click, and LIMA performs it. Because the location comes from the accessibility tree, the click lands on the real element. It works on buttons, links, menu items, list items, and text fields such as search and address bars, any control the accessibility tree exposes and the keyboard can focus.
+
 ## How it works
 
 The user signs in with **Google** (NVDA menu → Preferences → Settings → LIMA AI → Sign in with Google). AI calls go through the **LIMA backend proxy**: the add-on sends the screenshot plus the user's Firebase ID token, and the backend attaches the AI provider key server-side. **No API key or provider secret lives in this open-source add-on.** The vision model is fixed to `google/gemma-4-31b-it`, and every request carries a Zero-Data-Retention provider policy.
 
 ## Privacy
 
-When a feature is used, a screenshot of the active screen is sent to the LIMA backend, which forwards it to an AI provider (via OpenRouter) under a **Zero Data Retention** policy (providers may not store or train on the image). Screenshots are sent only when the user triggers a feature (Describe on demand, or web narration while toggled on with a browser focused). Sign-in uses the user's Google account; a minimal user record (account ID, email, sign-in time) is stored in Firestore to identify them.
+When a feature is used, a screenshot of the active screen is sent to the LIMA backend, which forwards it to an AI provider (via OpenRouter) under a **Zero Data Retention** policy (providers may not store or train on the image). Screenshots are sent only when the user triggers a feature (Describe on demand, click an element you describe, or web narration while toggled on with a browser focused). Sign-in uses the user's Google account; a minimal user record (account ID, email, sign-in time) is stored in Firestore to identify them.
 
 ## Project layout
 

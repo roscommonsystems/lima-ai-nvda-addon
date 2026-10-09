@@ -8,6 +8,7 @@
 import base64
 import json
 import logging
+import re
 import urllib.error
 import urllib.request
 
@@ -37,6 +38,22 @@ ELEMENT_PROMPT = (
 )
 
 MAX_TOKENS = 150
+
+# Bigger budget for the click-by-description selection reply (a short JSON object with the
+# chosen element number and a brief reason), so the number is never cut off.
+SELECT_MAX_TOKENS = 300
+
+SELECT_SYSTEM_PROMPT = (
+	"You are a UI element locator for a blind user. You are given a screenshot and a "
+	"numbered list of the clickable elements on screen, each with a name, a role, and its "
+	"center coordinates. Choose the single element that best matches the target the user "
+	'describes, and decide how it should be clicked from their wording: "double" to open an '
+	'item such as a file or folder (or when they say open or double-click), "right" for a '
+	'context menu or when they say right-click, otherwise "single". Reply with only a JSON '
+	"object, element_number first: "
+	'{"element_number": <the number, or "none">, "action": "single" | "double" | "right", '
+	'"reason": "<a few words>"}. Use "none" if no element clearly matches.'
+)
 
 CHANGES_PROMPT = (
 	"You are assisting a blind user browsing the web. Two screenshots are given, "
@@ -201,6 +218,55 @@ def describe_element(image_png_bytes, a11y_text, id_token, model=OPENROUTER_VISI
 	through the LIMA backend; return the description text."""
 	payload = build_payload(image_png_bytes, model, _localize(element_prompt(a11y_text), language), max_tokens)
 	return _post_and_parse(payload, id_token, timeout,_opener)
+
+
+def parse_selection(model_text, count):
+	"""Read the chosen element number and click action from the model's reply.
+
+	Returns (index, action): index is an int in 1..count, or None when the model declines
+	("none"), the number is out of range, or nothing usable is present; action is "single",
+	"double", or "right" (defaulting to "single"). Accepts the requested JSON object, and falls
+	back to a bare integer for the number only when the reply carried no element_number field, so
+	a number sitting in the model's "reason" text is never mistaken for a pick.
+	"""
+	if not model_text:
+		return None, "single"
+	number = None
+	action = "single"
+	found_in_json = False
+	start = model_text.find("{")
+	end = model_text.rfind("}")
+	if start != -1 and end > start:
+		try:
+			value = json.loads(model_text[start : end + 1])
+		except ValueError:
+			value = None
+		if isinstance(value, dict) and "element_number" in value:
+			number = value["element_number"]
+			found_in_json = True
+			requested = value.get("action")
+			if isinstance(requested, str) and requested.strip().lower() in ("single", "double", "right"):
+				action = requested.strip().lower()
+	if isinstance(number, str):
+		number = number.strip()
+	if not found_in_json:
+		match = re.search(r"\d+", model_text)
+		number = match.group() if match else None
+	try:
+		index = int(number)
+	except (TypeError, ValueError):
+		return None, action
+	if 1 <= index <= count:
+		return index, action
+	return None, action
+
+
+def select_element(screenshot_png, elements_text, description, id_token, model=OPENROUTER_VISION_MODEL, timeout=30, _opener=None):
+	"""POST the screenshot + numbered element list + the user's description through the LIMA
+	backend; return the model's raw reply for parse_selection to interpret."""
+	prompt = SELECT_SYSTEM_PROMPT + "\n\nTarget: " + description + "\n\nElements:\n" + elements_text
+	payload = build_payload(screenshot_png, model, prompt, SELECT_MAX_TOKENS)
+	return _post_and_parse(payload, id_token, timeout, _opener)
 
 
 def build_changes_payload(before_png, after_png, model=OPENROUTER_VISION_MODEL, prompt=CHANGES_PROMPT, max_tokens=MAX_TOKENS):

@@ -262,3 +262,73 @@ def test_describe_element_raises_network_code():
 	with pytest.raises(vision.VisionError)as exc:
 		vision.describe_element(b"img", "Role: button", "key", _opener=opener)
 	assert exc.value.code == "network"
+
+
+def test_parse_selection_reads_json_number():
+	assert vision.parse_selection('{"element_number": "2", "reason": "x"}', 5) == (2, "single")
+
+
+def test_parse_selection_reads_action_when_present():
+	assert vision.parse_selection('{"element_number": "2", "action": "double"}', 5) == (2, "double")
+	assert vision.parse_selection('{"element_number": "3", "action": "right"}', 5) == (3, "right")
+
+
+def test_parse_selection_invalid_action_defaults_to_single():
+	assert vision.parse_selection('{"element_number": "2", "action": "triple"}', 5) == (2, "single")
+
+
+def test_parse_selection_none_when_model_declines():
+	assert vision.parse_selection('{"element_number": "none", "reason": "no match"}', 5)[0] is None
+
+
+def test_parse_selection_none_when_out_of_range():
+	assert vision.parse_selection('{"element_number": "9"}', 5)[0] is None
+	assert vision.parse_selection('{"element_number": "0"}', 5)[0] is None
+
+
+def test_parse_selection_none_on_garbage_or_empty():
+	assert vision.parse_selection("garbage", 5)[0] is None
+	assert vision.parse_selection("", 5)[0] is None
+
+
+def test_parse_selection_falls_back_to_bare_integer():
+	assert vision.parse_selection("I think element 3 fits.", 5) == (3, "single")
+
+
+def test_parse_selection_declined_json_ignores_number_in_reason():
+	assert vision.parse_selection('{"element_number": "none", "reason": "none of the 4 match"}', 5)[0] is None
+
+
+def test_select_element_success_returns_model_text():
+	raw = json.dumps({"choices": [{"message": {"content": '{"element_number": "1"}'}}]}).encode("utf-8")
+	out = vision.select_element(b"png", "1. Send | button | 10,20", "the send button", "key", _opener=_fake_opener(raw_bytes=raw))
+	assert out == '{"element_number": "1"}'
+
+
+def test_select_element_sends_description_elements_and_image():
+	captured = {}
+
+	@contextmanager
+	def opener(request, timeout=None):
+		captured["body"] = json.loads(request.data.decode("utf-8"))
+
+		class _Resp:
+			def read(self_inner):
+				return json.dumps({"choices": [{"message": {"content": '{"element_number": "1"}'}}]}).encode("utf-8")
+
+		yield _Resp()
+
+	vision.select_element(b"PNGDATA", "1. Send | button | 10,20", "the send button", "key", _opener=opener)
+	content = captured["body"]["messages"][0]["content"]
+	text = content[0]["text"]
+	assert "the send button" in text
+	assert "Send | button" in text
+	assert base64.b64decode(content[1]["image_url"]["url"].split(",", 1)[1]) == b"PNGDATA"
+
+
+def test_select_element_network_failure_raises_network_code():
+	import urllib.error
+	opener = _fake_opener(raise_exc=urllib.error.URLError("down"))
+	with pytest.raises(vision.VisionError) as exc:
+		vision.select_element(b"png", "1. x | button | 0,0", "x", "key", _opener=opener)
+	assert exc.value.code == "network"
