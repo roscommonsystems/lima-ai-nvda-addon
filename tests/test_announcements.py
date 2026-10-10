@@ -19,7 +19,7 @@ def test_vietnamese_status_ignores_nvda_interface_language():
 def test_command_start_and_capture_error_use_vietnamese_speech_and_braille():
 	# Load the real command methods without requiring a running NVDA process.
 	source = Path(announcements.__file__).with_name("__init__.py").read_text(encoding="utf-8")
-	plugin_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef))
+	plugin_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin")
 	names = {"_status_text", "_announce_status", "_speak_localized", "_error_message", "script_describeScreen"}
 	methods = [node for node in plugin_class.body if isinstance(node, ast.FunctionDef) and node.name in names]
 	for method in methods:
@@ -45,6 +45,7 @@ def test_command_start_and_capture_error_use_vietnamese_speech_and_braille():
 	exec(compile(ast.Module(body=[plugin_class], type_ignores=[]), "plugin_commands", "exec"), namespace)
 	plugin = namespace["GlobalPlugin"]()
 	plugin._describing = False
+	plugin._searching = False
 	plugin.script_describeScreen(None)
 	assert speech_calls == [
 		([("language", "vi"), "Đang mô tả màn hình."], "normal"),

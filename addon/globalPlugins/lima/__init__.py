@@ -1,12 +1,14 @@
 # -*- coding: UTF-8 -*-
 # LIMA NVDA add-on: global plugin.
 
+import logging
 import threading
 import time
 
 import globalPluginHandler
 import ui
 import gui
+import wx
 import queueHandler
 import speech
 from speech.priorities import Spri
@@ -14,6 +16,7 @@ from speech.commands import LangChangeCommand
 import addonHandler
 import braille
 import api
+import winUser
 import textInfos
 import config
 import core
@@ -25,15 +28,60 @@ from . import vision
 from . import settings
 from . import webnarration
 from . import firebase_config
+from . import uielements
+from . import mouseclick
 from . import announcements
 
 addonHandler.initTranslation()
+
+log = logging.getLogger(__name__)
 
 
 # Maps a selected reply language to the NVDA/synth locale, so a non-English reply is spoken
 # with that language's voice (needs a synth that supports it, e.g. eSpeak NG has Filipino).
 # English is absent: the reply is already in the default voice's language.
 _SPEECH_LOCALES = {"tl": "fil", "vi": "vi"}
+
+# Earcons for the click command, so a blind user hears what is happening before the words: a
+# short tone when the search starts, a higher tone when the click succeeds, and a lower, longer
+# tone when it fails (nothing found, no match, or an error). Frequency in hertz, duration in ms.
+_CLICK_START_TONE = (440, 80)
+_CLICK_OK_TONE = (660, 100)
+_CLICK_FAIL_TONE = (300, 180)
+# A soft, short tick repeated while the AI search runs, so the user knows LIMA is still working.
+_CLICK_WAIT_TONE = (350, 40)
+_CLICK_WAIT_INTERVAL_MS = 800
+
+
+class _ClickTargetDialog(wx.Dialog):
+	"""Accessible prompt for the click target, built the way NVDA's own dialogs are.
+
+	A labelled single-line edit that NVDA narrates like any edit field (typed characters, and
+	Ctrl+Arrow word review), plus standard OK and Cancel buttons NVDA names on Tab. Escape and
+	the title-bar close button cancel.
+	"""
+
+	def __init__(self, parent):
+		# Translators: title of the click-by-description dialog.
+		super().__init__(parent, title=_("LIMA AI"))
+		mainSizer = wx.BoxSizer(wx.VERTICAL)
+		contents = gui.guiHelper.BoxSizerHelper(self, orientation=wx.VERTICAL)
+		# Translators: label of the field for describing what to click.
+		self.inputCtrl = contents.addLabeledControl(_("Describe what you want to click:"), wx.TextCtrl)
+		mainSizer.Add(contents.sizer, border=gui.guiHelper.BORDER_FOR_DIALOGS, flag=wx.ALL)
+		buttons = self.CreateButtonSizer(wx.OK | wx.CANCEL)
+		if buttons is not None:
+			mainSizer.Add(buttons, border=gui.guiHelper.BORDER_FOR_DIALOGS, flag=wx.EXPAND | wx.ALL)
+		self.SetSizerAndFit(mainSizer)
+		self.CentreOnScreen()
+		# Start on the edit field so the user can type straight away; without this wx would put the
+		# initial focus on the default OK button. NVDA announces the dialog and this field when the
+		# dialog opens, which works because the script shows it via wx.CallAfter rather than from
+		# inside its keyboard hook.
+		self.inputCtrl.SetFocus()
+
+	def get_value(self):
+		return self.inputCtrl.GetValue().strip()
 
 
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
@@ -50,6 +98,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		vision.ENDPOINT_URL = firebase_config.LIMA_BACKEND_URL + "/v1/chat/completions"
 		gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(settings.LimaSettingsPanel)
 		self._describing = False
+		# True only while the click-by-description prompt is on screen, so a second NVDA+Alt+C
+		# press cannot stack a second dialog on top of the first.
+		self._click_prompt_open = False
+		# True while a click search (enumerate + AI) is running: drives the working tick and lets a
+		# second NVDA+Alt+C cancel it.
+		self._searching = False
 		self._last_narration_time = 0.0
 		self._web_narrator = webnarration.WebNarrator(
 			capture,
@@ -72,6 +126,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				_(
 					"Welcome to LIMA AI. To describe your screen press NVDA+Alt+D, "
 					"to describe the focused element press NVDA+Alt+E, "
+					"to click something by describing it press NVDA+Alt+C, "
 					"and to toggle web narration press NVDA+Alt+W. "
 					"You can change these shortcuts in NVDA's Input Gestures."
 				),
@@ -113,6 +168,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			"empty": self._status_text("No description was returned. Try again."),
 			# Translators: spoken when the focused element has no visible location to capture.
 			"focus": self._status_text("The focused element has no visible location to capture. Move to a control and try again."),
+			# Translators: spoken when the click could not be performed.
+			"click_failed": self._status_text("The click could not be performed. Please try again."),
 		}
 		return messages.get(code, messages["api_error"])
 
@@ -141,7 +198,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if not id_token:
 			self._announce_status(self._error_message("signed_out"))
 			return
-		if self._describing:
+		if self._describing or self._searching:
 			self._announce_status(self._error_message("busy"))
 			return
 		self._describing = True
@@ -183,7 +240,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if not id_token:
 			self._announce_status(self._error_message("signed_out"))
 			return
-		if self._describing:
+		if self._describing or self._searching:
 			self._announce_status(self._error_message("busy"))
 			return
 		obj = self._element_target()
@@ -360,3 +417,164 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		active = self._web_narrator.toggle()
 		# Translators: spoken when web narration is turned on or off.
 		self._announce_status(self._status_text("Web narration on") if active else self._status_text("Web narration off"))
+
+	# Click by description. The user describes what to do in plain words ("open the Downloads
+	# folder", "click the Send button", "right-click the file"); LIMA enumerates the on-screen
+	# clickable elements from the accessibility tree, the vision model picks the matching element
+	# and the action it needs (single, double, or right click), and LIMA performs it at the
+	# element's center. The coordinates come from the accessibility tree, never from the model, so
+	# a click can only ever land on a real listed control. Bound to NVDA+Alt+C (the same NVDA+Alt
+	# layer LIMA already uses); reassignable in Input Gestures under LIMA AI.
+	@script(
+		# Translators: Description of the command that clicks a described element.
+		description=_("Click an on-screen element you describe."),
+		gesture="kb:NVDA+alt+c",
+	)
+	def script_clickElement(self, gesture):
+		wx.CallAfter(self._click_by_description)
+
+	def _click_by_description(self):
+		"""Prompt for a target, then locate and click it. The script dispatches this with
+		wx.CallAfter so it runs on a fresh turn of the GUI event loop rather than inside NVDA's
+		keyboard hook: a modal dialog opened directly from a script blocks that hook, and NVDA
+		then neither announces the dialog nor echoes what the user types into it.
+		"""
+		if self._searching:
+			# A second press while a search is running cancels it.
+			self._searching = False
+			tones.beep(*_CLICK_FAIL_TONE)
+			# Translators: spoken when the user cancels a click search in progress.
+			self._announce_status(self._status_text("Search cancelled."))
+			return
+		if self._click_prompt_open:
+			return  # the prompt is already open; ignore the repeat press rather than stacking a dialog
+		id_token = settings.get_id_token()
+		if not id_token:
+			self._announce_status(self._error_message("signed_out"))
+			return
+		if self._describing:
+			self._announce_status(self._error_message("busy"))
+			return
+		# Capture the top-level foreground window before our dialog takes focus, so enumeration and
+		# the screenshot are of the user's window, not our dialog. The Win32 foreground window is
+		# the whole app window, so its UIA subtree covers everything (menu bar included), unlike the
+		# focused control, which on some apps is just the inner text area.
+		foreground_hwnd = winUser.getForegroundWindow()
+		# Ask what to click; Escape or Cancel aborts.
+		self._click_prompt_open = True
+		gui.mainFrame.prePopup()
+		dialog = _ClickTargetDialog(gui.mainFrame)
+		try:
+			description = dialog.get_value() if dialog.ShowModal() == wx.ID_OK else ""
+		finally:
+			dialog.Destroy()
+			gui.mainFrame.postPopup()
+			self._click_prompt_open = False
+		if not description:
+			return
+		self._searching = True
+		# Closing the dialog makes NVDA announce the window regaining focus; spoken immediately,
+		# the start signal below is cancelled by that announcement and the user misses it. Defer a
+		# moment so the focus announcement passes first, then signal and begin the search.
+		core.callLater(200, self._begin_search, foreground_hwnd, description, id_token)
+
+	def _begin_search(self, foreground_hwnd, description, id_token):
+		# Runs on the GUI thread a moment after the prompt closes. Capture the screen now (the
+		# prompt is gone), signal that the search has started, and hand the slow work to a worker.
+		if not self._searching:
+			return  # cancelled during the 200ms deferral window
+		try:
+			screenshot = capture.capture_screen_png()
+		except Exception:
+			self._searching = False
+			self._announce_status(self._error_message("capture"))
+			return
+		tones.beep(*_CLICK_START_TONE)
+		# Translators: spoken while LIMA locates the target; {desc} is the user's own words.
+		self._announce_status(self._status_text("Finding {desc}.").format(desc=description))
+		core.callLater(_CLICK_WAIT_INTERVAL_MS, self._pulse_working)
+		thread = threading.Thread(
+			target=self._run_select,
+			args=(foreground_hwnd, screenshot, description, id_token),
+			daemon=True,
+		)
+		thread.start()
+
+	def _pulse_working(self):
+		# A soft repeating tick while the search runs, so the user knows LIMA is still working.
+		# It reschedules itself until _finish_click (or a cancel) clears self._searching.
+		if not self._searching:
+			return
+		tones.beep(*_CLICK_WAIT_TONE)
+		core.callLater(_CLICK_WAIT_INTERVAL_MS, self._pulse_working)
+
+	def _run_select(self, foreground_hwnd, screenshot, description, id_token):
+		# Enumeration and the AI call both run here, off NVDA's GUI thread: a UIA walk returns the
+		# full window only from a worker thread, and the network call must not block speech. Every
+		# dialog, spoken message, and the click itself stays on the GUI thread via queueFunction.
+		elements = []
+		index = None
+		action = "single"
+		error = None
+		try:
+			elements, debug = uielements.enumerate_clickable(foreground_hwnd)
+			log.debug("LIMA click enumeration: %s", debug)
+			if not elements:
+				error = "no_elements"
+			else:
+				reply = vision.select_element(
+					screenshot, uielements.format_elements_for_prompt(elements), description, id_token,
+				)
+				index, action = vision.parse_selection(reply, len(elements))
+		except vision.VisionError as e:
+			error = e.code
+		except Exception:
+			log.exception("LIMA click selection failed")
+			error = "api_error"
+		queueHandler.queueFunction(
+			queueHandler.eventQueue, self._finish_click, foreground_hwnd, elements, index, action, description, error
+		)
+
+	def _finish_click(self, foreground_hwnd, elements, index, action, description, error):
+		if not self._searching:
+			return  # the user cancelled the search while it was running; stay silent
+		self._searching = False  # we are reporting now, so stop the working tick
+		# Any failure gets the low "failed" earcon so the outcome is clear before the words.
+		if error == "no_elements":
+			# Translators: spoken when nothing clickable was found on screen.
+			failure = self._status_text("I could not find anything to click here.")
+		elif error is not None:
+			failure = self._error_message(error)
+		elif index is None:
+			# Translators: spoken when nothing on screen matched; {desc} is the user's description.
+			failure = self._status_text("I could not find {desc}.").format(desc=description)
+		else:
+			failure = None
+		if failure is not None:
+			tones.beep(*_CLICK_FAIL_TONE)
+			self._announce_status(failure)
+			return
+		# Perform the action the model chose from the user's wording (single, double, or right
+		# click), the way the flagship's mouse-click tool does. The coordinates come from the
+		# accessibility tree, so a wrong pick can still only land on a real listed control, and
+		# NVDA announces the focus change the click causes, so the user still hears what happened.
+		element = elements[index - 1]
+		button = "right" if action == "right" else "left"
+		double = action == "double"
+		try:
+			mouseclick.click_at(element.center, foreground_hwnd, button, double)
+		except Exception:
+			log.exception("LIMA click could not be performed")
+			tones.beep(*_CLICK_FAIL_TONE)
+			self._announce_status(self._error_message("click_failed"))
+			return
+		tones.beep(*_CLICK_OK_TONE)
+		if action == "double":
+			# Translators: spoken after a double-click; {name} is the element name.
+			self._announce_status(self._status_text("Double-clicked {name}.").format(name=element.name))
+		elif action == "right":
+			# Translators: spoken after a right-click; {name} is the element name.
+			self._announce_status(self._status_text("Right-clicked {name}.").format(name=element.name))
+		else:
+			# Translators: spoken after a single click; {name} is the element name.
+			self._announce_status(self._status_text("Clicked {name}.").format(name=element.name))
