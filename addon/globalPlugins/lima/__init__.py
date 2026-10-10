@@ -481,6 +481,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def _begin_search(self, foreground_hwnd, description, id_token):
 		# Runs on the GUI thread a moment after the prompt closes. Capture the screen now (the
 		# prompt is gone), signal that the search has started, and hand the slow work to a worker.
+		if not self._searching:
+			return  # cancelled during the 200ms deferral window
 		try:
 			screenshot = capture.capture_screen_png()
 		except Exception:
