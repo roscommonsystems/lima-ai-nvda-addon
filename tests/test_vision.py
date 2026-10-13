@@ -157,7 +157,7 @@ def test_build_payload_includes_zdr_provider_inside_provider_object():
 	assert payload["provider"]["zdr"] is True
 	assert payload["provider"]["data_collection"] == "deny"
 	assert payload["provider"]["allow_fallbacks"] is True
-	assert payload["provider"]["order"] == ["CoreWeave", "Novita"]
+	assert payload["provider"]["order"] == ["CoreWeave", "Weights & Biases", "Cerebras", "Novita"]
 	# ZDR must NOT be top-level (OpenRouter ignores it there).
 	assert "zdr" not in payload
 
