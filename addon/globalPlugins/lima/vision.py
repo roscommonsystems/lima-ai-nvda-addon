@@ -94,8 +94,10 @@ def _localize(prompt, language):
 
 OPENROUTER_VISION_MODEL = "google/gemma-4-31b-it"
 
-# Vetted, trusted ZDR-supporting providers, in priority order (Weights & Biases first).
-_ZDR_PROVIDERS = ["Weights & Biases", "Cerebras", "Novita"]
+# Vetted, trusted ZDR-supporting providers, in priority order: CoreWeave first (reliable uptime for
+# the current model), then Weights & Biases, Cerebras, and Novita. Some of these do not serve the
+# current model, but they are kept in the list so they are ready when the base model changes.
+_ZDR_PROVIDERS = ["CoreWeave", "Weights & Biases", "Cerebras", "Novita"]
 
 # ZDR is mandatory (screenshots are sensitive): only route to Zero-Data-Retention
 # endpoints. These MUST live inside the "provider" object; OpenRouter silently
