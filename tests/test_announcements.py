@@ -90,8 +90,8 @@ def test_command_start_and_capture_error_use_vietnamese_speech_and_braille():
 	plugin.script_describeScreen(None)
 	assert speech_calls == [
 		([("language", "vi"), "Đang mô tả màn hình."], "normal"),
-		([("language", "vi"), "Không thể chụp màn hình hoặc phần tử."], "normal"),
+		([("language", "vi"), "Không thể chụp màn hình hoặc đối tượng."], "normal"),
 	]
-	assert braille_calls == ["Đang mô tả màn hình.", "Không thể chụp màn hình hoặc phần tử."]
+	assert braille_calls == ["Đang mô tả màn hình.", "Không thể chụp màn hình hoặc đối tượng."]
 	assert not ui_calls
 	assert not plugin._describing
