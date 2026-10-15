@@ -17,6 +17,14 @@ VIETNAMESE = {
 	"Web narration on": "Đã bật mô tả trang web.",
 	"Web narration off": "Đã tắt mô tả trang web.",
 	"Web page update:": "Cập nhật trang web:",
+	"Search cancelled.": "Đã hủy tìm kiếm.",
+	"Finding {desc}.": "Đang tìm {desc}.",
+	"I could not find anything to click here.": "Không tìm thấy phần tử nào để nhấp tại đây.",
+	"I could not find {desc}.": "Không tìm thấy {desc}.",
+	"Clicked {name}.": "Đã nhấp vào {name}.",
+	"Double-clicked {name}.": "Đã nhấp đúp vào {name}.",
+	"Right-clicked {name}.": "Đã nhấp chuột phải vào {name}.",
+	"The click could not be performed. Please try again.": "Không thể thực hiện thao tác nhấp. Vui lòng thử lại.",
 }
 
 
