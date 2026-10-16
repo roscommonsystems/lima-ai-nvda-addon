@@ -1,10 +1,51 @@
 import ast
 from pathlib import Path
+from string import Formatter
 from types import SimpleNamespace
 
 import pytest
 
 import announcements
+
+
+CLICK_MESSAGES = [
+	"Search cancelled.",
+	"Finding {desc}.",
+	"I could not find anything to click here.",
+	"I could not find {desc}.",
+	"Clicked {name}.",
+	"Double-clicked {name}.",
+	"Right-clicked {name}.",
+	"The click could not be performed. Please try again.",
+]
+
+
+@pytest.mark.parametrize("message", CLICK_MESSAGES)
+def test_vietnamese_click_announcements_preserve_format_fields(message):
+	def unexpected_fallback(text):
+		pytest.fail(f"Missing Vietnamese translation for {text!r}")
+
+	translated = announcements.status_text(message, "vi", unexpected_fallback)
+	assert translated.strip()
+	assert translated != message
+	formatter = Formatter()
+	original_fields = [field for _, field, _, _ in formatter.parse(message) if field is not None]
+	translated_fields = [field for _, field, _, _ in formatter.parse(translated) if field is not None]
+	assert sorted(translated_fields) == sorted(original_fields)
+	values = {"desc": "nút Gửi", "name": "Tải xuống"}
+	formatted = translated.format(**values)
+	for field in original_fields:
+		assert values[field] in formatted
+
+
+@pytest.mark.parametrize("message", CLICK_MESSAGES)
+@pytest.mark.parametrize("language", ["en", "tl", "unknown"])
+def test_click_announcements_keep_interface_translation_for_other_languages(message, language):
+	assert announcements.status_text(message, language, lambda text: "Translated: " + text) == "Translated: " + message
+
+
+def test_unknown_vietnamese_message_uses_interface_translation():
+	assert announcements.status_text("Unknown status.", "vi", lambda text: "Fallback: " + text) == "Fallback: Unknown status."
 
 
 @pytest.mark.parametrize("language", ["en", "tl", "unknown"])
@@ -49,8 +90,8 @@ def test_command_start_and_capture_error_use_vietnamese_speech_and_braille():
 	plugin.script_describeScreen(None)
 	assert speech_calls == [
 		([("language", "vi"), "Đang mô tả màn hình."], "normal"),
-		([("language", "vi"), "Không thể chụp màn hình hoặc phần tử."], "normal"),
+		([("language", "vi"), "Không thể chụp màn hình hoặc đối tượng."], "normal"),
 	]
-	assert braille_calls == ["Đang mô tả màn hình.", "Không thể chụp màn hình hoặc phần tử."]
+	assert braille_calls == ["Đang mô tả màn hình.", "Không thể chụp màn hình hoặc đối tượng."]
 	assert not ui_calls
 	assert not plugin._describing
