@@ -22,7 +22,7 @@ VIETNAMESE = {
 	"I could not find anything to click here.": "Không tìm thấy đối tượng nào để nhấp tại đây.",
 	"I could not find {desc}.": "Không tìm thấy {desc}.",
 	"Clicked {name}.": "Đã nhấp vào {name}.",
-	"Double-clicked {name}.": "Đã nhấp đúp vào {name}.",
+	"Double-clicked {name}.": "Đã nhấp hai lần vào {name}.",
 	"Right-clicked {name}.": "Đã nhấp chuột phải vào {name}.",
 	"The click could not be performed. Please try again.": "Không thể thực hiện thao tác nhấp. Vui lòng thử lại.",
 }
