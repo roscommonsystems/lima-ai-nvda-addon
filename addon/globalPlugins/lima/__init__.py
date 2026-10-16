@@ -31,6 +31,7 @@ from . import firebase_config
 from . import uielements
 from . import mouseclick
 from . import announcements
+from . import usage
 
 addonHandler.initTranslation()
 
@@ -96,8 +97,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		# Point the vision client at the configured LIMA backend proxy (all AI calls go
 		# through it so the OpenRouter key never reaches the client).
 		vision.ENDPOINT_URL = firebase_config.LIMA_BACKEND_URL + "/v1/chat/completions"
+		# Credit usage comes from the same backend, which holds the key and reads it from
+		# OpenRouter; only the percentage comes back.
+		usage.ENDPOINT_URL = firebase_config.LIMA_BACKEND_URL + "/usage"
 		gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(settings.LimaSettingsPanel)
 		self._describing = False
+		# True while NVDA+Alt+U is waiting on the backend, so repeat presses do not stack requests.
+		self._checking_usage = False
 		# True only while the click-by-description prompt is on screen, so a second NVDA+Alt+C
 		# press cannot stack a second dialog on top of the first.
 		self._click_prompt_open = False
@@ -113,6 +119,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			get_language=settings.get_language,
 			interval=settings.get_web_narration_interval(),
 			change_threshold=settings.get_web_narration_threshold(),
+			on_error=self._narration_failed,
 		)
 		# On first run, announce the add-on and its default shortcuts so users learn how to
 		# use it without hunting through Input Gestures. Deferred a few seconds so it does not
@@ -173,8 +180,33 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		}
 		return messages.get(code, messages["api_error"])
 
+	def _vision_error_message(self, error):
+		"""The spoken message for a VisionError. A spent credit says when it comes back,
+		using the reset date the backend sent with its 402."""
+		if error.code == "credit_exhausted":
+			return usage.limit_message(
+				usage.reset_policy(error.resets),
+				usage.reset_date(error.resets_at),
+				self._status_text,
+				settings.get_language(),
+			)
+		return self._error_message(error.code)
+
+	def _announce_translated(self, text):
+		"""Announce a line that is translated into every LIMA language (the credit lines).
+
+		Unlike _announce_status, Tagalog gets the Filipino voice too: these lines exist in
+		Tagalog, while the add-on's other command messages are still English for Tagalog users.
+		"""
+		locale = _SPEECH_LOCALES.get(settings.get_language())
+		if locale:
+			self._speak_localized(text, locale, Spri.NORMAL, True)
+		else:
+			ui.message(text)
+
 	# Default gestures use the NVDA+Alt layer (D: describe screen, E: describe focused element, W:
-	# web narration), which NVDA core leaves free apart from the braille auto-scroll keys
+	# web narration, C: click by description, U: credit usage), which NVDA core leaves free apart
+	# from the braille auto-scroll keys
 	# (J/K/L). We deliberately avoid NVDA+Shift+D and similar,
 	# because those already map to NVDA commands (NVDA+Shift+D is the audio-ducking toggle).
 	# The minor "announce running" health check ships unbound. Every command has a
@@ -222,7 +254,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			message = vision.describe_image(png, id_token, language=settings.get_language())
 			locale = _SPEECH_LOCALES.get(settings.get_language())
 		except vision.VisionError as e:
-			message = self._error_message(e.code)
+			message = self._vision_error_message(e)
+			if e.code == "credit_exhausted":
+				# Translated into every LIMA language, so it is spoken in that language's voice.
+				locale = _SPEECH_LOCALES.get(settings.get_language())
 		except Exception:
 			pass  # keep the default api_error message
 		finally:
@@ -280,7 +315,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			message = vision.describe_element(png, context, id_token, language=settings.get_language())
 			locale = _SPEECH_LOCALES.get(settings.get_language())
 		except vision.VisionError as e:
-			message = self._error_message(e.code)
+			message = self._vision_error_message(e)
+			if e.code == "credit_exhausted":
+				locale = _SPEECH_LOCALES.get(settings.get_language())
 		except Exception:
 			pass  # keep the default api_error message
 		finally:
@@ -393,6 +430,21 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		locale = _SPEECH_LOCALES.get(settings.get_language())
 		queueHandler.queueFunction(queueHandler.eventQueue, self._speak_localized, text, locale, Spri.NEXT, False)
 
+	def _narration_failed(self, code, error, stopped):
+		# Runs on the web-narration timer thread; NVDA speech must run on the main thread.
+		queueHandler.queueFunction(queueHandler.eventQueue, self._report_narration_failure, code, error, stopped)
+
+	def _report_narration_failure(self, code, error, stopped):
+		"""Tell the user why narration failed. The narrator reports each failure once, not
+		every interval, and stops by itself when the credit is used up or the user signed out."""
+		if code == "credit_exhausted" and error is not None:
+			self._announce_translated(self._vision_error_message(error))
+		else:
+			self._announce_status(self._error_message(code))
+		if stopped:
+			# Translators: spoken when web narration is turned on or off.
+			self._announce_status(self._status_text("Web narration off"))
+
 	def _speak_localized(self, text, locale, priority, show_in_braille):
 		"""Speak `text` at `priority` on the main thread. When `locale` is set, switch the voice
 		to that language so a non-English reply is pronounced by a synth that supports it; show it
@@ -417,6 +469,39 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		active = self._web_narrator.toggle()
 		# Translators: spoken when web narration is turned on or off.
 		self._announce_status(self._status_text("Web narration on") if active else self._status_text("Web narration off"))
+
+	# Credit usage. Speaks the same line as the LIMA AI settings panel and as LIMA desktop's
+	# Subscription dialog: "Credits used this month: 34% — resets in 4 days". The backend
+	# works out the percentage from the user's OpenRouter key and sends only that back.
+	@script(
+		# Translators: Description of the command that announces credit usage.
+		description=_("Announces how much of your LIMA credit you have used."),
+		gesture="kb:NVDA+alt+u",
+	)
+	def script_announceCreditUsage(self, gesture):
+		id_token = settings.get_id_token()
+		if not id_token:
+			self._announce_status(self._error_message("signed_out"))
+			return
+		if self._checking_usage:
+			return  # the answer to the previous press is on its way
+		self._checking_usage = True
+		# Translators: spoken while LIMA asks the backend for the user's credit usage.
+		self._announce_translated(self._status_text("Checking credit usage."))
+		thread = threading.Thread(target=self._run_credit_usage, args=(id_token,), daemon=True)
+		thread.start()
+
+	def _run_credit_usage(self, id_token):
+		result = None
+		try:
+			result = usage.fetch_credit_usage(id_token)
+		except Exception:
+			log.exception("LIMA credit usage check failed")
+		finally:
+			self._checking_usage = False
+		line = usage.usage_text(result, usage.today_utc(), self._status_text, settings.get_language())
+		# NVDA speech must run on the main thread.
+		queueHandler.queueFunction(queueHandler.eventQueue, self._announce_translated, line)
 
 	# Click by description. The user describes what to do in plain words ("open the Downloads
 	# folder", "click the Send button", "right-click the file"); LIMA enumerates the on-screen
@@ -527,7 +612,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				)
 				index, action = vision.parse_selection(reply, len(elements))
 		except vision.VisionError as e:
-			error = e.code
+			# Kept whole rather than as e.code: a spent credit carries its reset date.
+			error = e
 		except Exception:
 			log.exception("LIMA click selection failed")
 			error = "api_error"
@@ -543,6 +629,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if error == "no_elements":
 			# Translators: spoken when nothing clickable was found on screen.
 			failure = self._status_text("I could not find anything to click here.")
+		elif isinstance(error, vision.VisionError) and error.code == "credit_exhausted":
+			tones.beep(*_CLICK_FAIL_TONE)
+			self._announce_translated(self._vision_error_message(error))
+			return
+		elif isinstance(error, vision.VisionError):
+			failure = self._error_message(error.code)
 		elif error is not None:
 			failure = self._error_message(error)
 		elif index is None:

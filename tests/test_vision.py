@@ -88,6 +88,41 @@ def test_describe_image_http_error_raises_api_error():
 	assert exc.value.code == "api_error"
 
 
+def _http_402(body):
+	import io
+	import urllib.error
+	return urllib.error.HTTPError("https://backend.test", 402, "Payment Required", {}, io.BytesIO(body))
+
+
+def test_a_402_is_credit_exhausted_with_the_reset_date():
+	"""The backend's "this cycle's credit is spent", not a service error."""
+	body = json.dumps({
+		"message": "openrouter_usage_limit_exceeded", "plan_tier": "free",
+		"resets": "monthly", "resets_at": "2026-10-23",
+	}).encode("utf-8")
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_image(b"img", "key", "m", _opener=_fake_opener(raise_exc=_http_402(body)))
+	assert exc.value.code == "credit_exhausted"
+	assert exc.value.resets == "monthly"
+	assert exc.value.resets_at == "2026-10-23"
+
+
+@pytest.mark.parametrize("body", [b"", b"not json", b'{"message": "openrouter_usage_limit_exceeded"}'])
+def test_a_402_without_reset_fields_is_still_credit_exhausted(body):
+	"""An older server sends no reset fields; the user still hears the credit message."""
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_image(b"img", "key", "m", _opener=_fake_opener(raise_exc=_http_402(body)))
+	assert exc.value.code == "credit_exhausted"
+	assert exc.value.resets_at is None
+
+
+def test_select_element_402_is_credit_exhausted():
+	body = b'{"resets": "monthly", "resets_at": "2026-10-23"}'
+	with pytest.raises(vision.VisionError) as exc:
+		vision.select_element(b"img", "1. OK", "ok", "key", _opener=_fake_opener(raise_exc=_http_402(body)))
+	assert exc.value.code == "credit_exhausted"
+
+
 def test_describe_image_logs_the_real_error_on_network_failure(caplog):
 	import urllib.error
 	opener = _fake_opener(raise_exc=urllib.error.URLError("boom-detail"))

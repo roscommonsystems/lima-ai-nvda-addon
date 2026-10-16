@@ -40,17 +40,38 @@ class FakeVision:
 		return "described"
 
 
+class CodedError(Exception):
+	"""Stands in for vision.VisionError: an exception with a speakable code."""
+
+	def __init__(self, code):
+		super().__init__(code)
+		self.code = code
+
+
 class RaisingVision:
 	NO_CHANGE = "NO_CHANGE"
 
+	def __init__(self, errors=None):
+		# One entry per call: an exception to raise, or a description to return.
+		self._script = list(errors) if errors else [RuntimeError("boom")]
+
 	def describe_changes(self, before, after, api_key, previous=None, language="en"):
-		raise RuntimeError("boom")
+		step = self._script.pop(0) if len(self._script) > 1 else self._script[0]
+		if isinstance(step, Exception):
+			raise step
+		return step
 
 
-def _make(cap, vis, spoken):
+def _make(cap, vis, spoken, errors=None, token="key"):
 	return webnarration.WebNarrator(
-		cap, vis, lambda: "key", lambda t: spoken.append(t), interval=3600
+		cap, vis, lambda: token, lambda t: spoken.append(t), interval=3600,
+		on_error=(lambda code, error, stopped: errors.append((code, stopped))) if errors is not None else (lambda *a: None),
 	)
+
+
+def _browser(changes):
+	"""A browser window whose page changes on every check after the first."""
+	return FakeCapture("Site - Google Chrome", [b"t"] * (changes + 1), [b"f"] * (changes + 1), True)
 
 
 def test_toggle_flips_active():
@@ -125,14 +146,109 @@ def test_check_once_noop_when_inactive():
 	assert vis.calls == []
 
 
-def test_vision_error_is_swallowed():
-	spoken = []
-	cap = FakeCapture("Site - Google Chrome", [b"t1", b"t2"], [b"full1", b"full2"], True)
-	n = _make(cap, RaisingVision(), spoken)
+def test_a_failure_is_reported_not_spoken_as_a_description():
+	spoken, errors = [], []
+	n = _make(_browser(1), RaisingVision([CodedError("network")]), spoken, errors)
 	n._active = True
 	n._check_once()  # baseline
-	n._check_once()  # change -> describe_changes raises -> swallowed
+	n._check_once()  # change -> describe_changes raises
 	assert spoken == []
+	assert errors == [("network", False)]
+	assert n.is_active is True  # a network blip may pass; narration carries on
+
+
+def test_the_same_failure_is_reported_once_not_every_interval():
+	errors = []
+	n = _make(_browser(3), RaisingVision([CodedError("network")]), [], errors)
+	n._active = True
+	for _ in range(4):
+		n._check_once()
+	assert errors == [("network", False)]
+
+
+def test_a_different_failure_is_reported():
+	errors = []
+	n = _make(_browser(2), RaisingVision([CodedError("network"), CodedError("api_error")]), [], errors)
+	n._active = True
+	for _ in range(3):
+		n._check_once()
+	assert errors == [("network", False), ("api_error", False)]
+
+
+def test_a_failure_after_a_success_is_reported_again():
+	errors, spoken = [], []
+	vis = RaisingVision([CodedError("network"), "A dialog opened.", CodedError("network")])
+	n = _make(_browser(3), vis, spoken, errors)
+	n._active = True
+	for _ in range(4):
+		n._check_once()
+	assert spoken == ["A dialog opened."]
+	assert errors == [("network", False), ("network", False)]
+
+
+def test_spent_credit_stops_narration():
+	"""Every later tick would get the same 402, so narration turns itself off."""
+	errors = []
+	n = _make(_browser(1), RaisingVision([CodedError("credit_exhausted")]), [], errors)
+	n.start()
+	n._check_once()  # baseline
+	n._check_once()  # change -> 402
+	assert errors == [("credit_exhausted", True)]
+	assert n.is_active is False
+	assert n._timer is None
+
+
+def test_the_spent_credit_error_is_passed_on_with_its_details():
+	"""The plugin needs the error itself to say when the credit resets."""
+	seen = []
+	error = CodedError("credit_exhausted")
+	n = webnarration.WebNarrator(
+		_browser(1), RaisingVision([error]), lambda: "key", lambda t: None, interval=3600,
+		on_error=lambda code, err, stopped: seen.append(err),
+	)
+	n._active = True
+	n._check_once()
+	n._check_once()
+	assert seen == [error]
+
+
+def test_signing_out_stops_narration_without_calling_the_ai():
+	errors = []
+	vis = FakeVision()
+	n = _make(_browser(1), vis, [], errors, token="")
+	n.start()
+	n._check_once()  # baseline
+	n._check_once()  # change, but no token
+	assert errors == [("signed_out", True)]
+	assert vis.calls == []
+	assert n.is_active is False
+
+
+def test_a_capture_failure_is_reported_as_capture():
+	class BrokenCapture(FakeCapture):
+		def capture_thumbnail_rgb(self):
+			raise OSError("screen locked")
+
+	errors = []
+	n = _make(BrokenCapture("Site - Google Chrome", [], [], True), FakeVision(), [], errors)
+	n._active = True
+	n._check_once()
+	n._check_once()
+	assert errors == [("capture", False)]
+
+
+def test_restarting_clears_the_failure_streak():
+	errors = []
+	n = _make(_browser(3), RaisingVision([CodedError("network")]), [], errors)
+	n._active = True
+	n._check_once()
+	n._check_once()
+	n.stop()
+	n.start()
+	n._check_once()  # new baseline after start
+	n._check_once()
+	n.stop()
+	assert errors == [("network", False), ("network", False)]
 
 
 def test_skips_speaking_when_model_returns_no_change():
