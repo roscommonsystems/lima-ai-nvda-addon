@@ -114,12 +114,29 @@ VISION_PROVIDER = {
 class VisionError(Exception):
 	"""A failure with a stable code the caller maps to a spoken message.
 
-	code is one of: "api_error", "network", "empty".
+	code is one of: "api_error", "network", "empty", "credit_exhausted".
+
+	For "credit_exhausted" (the backend's 402), `resets` and `resets_at` carry the server's
+	reset policy and YYYY-MM-DD date when it sent them, so the user can be told when their
+	credit comes back.
 	"""
 
-	def __init__(self, code):
+	def __init__(self, code, resets=None, resets_at=None):
 		super().__init__(code)
 		self.code = code
+		self.resets = resets
+		self.resets_at = resets_at
+
+
+def _credit_exhausted(raw_body):
+	"""The VisionError for a 402, with whatever reset fields the body carries."""
+	try:
+		body = json.loads(raw_body) if raw_body else {}
+	except ValueError:
+		body = {}
+	if not isinstance(body, dict):
+		body = {}
+	return VisionError("credit_exhausted", resets=body.get("resets"), resets_at=body.get("resets_at"))
 
 
 def build_payload(image_png_bytes, model=OPENROUTER_VISION_MODEL, prompt=DEFAULT_PROMPT, max_tokens=MAX_TOKENS):
@@ -181,12 +198,17 @@ def _post_and_parse(payload, id_token, timeout, _opener):
 		with opener(request, timeout=timeout) as response:
 			raw = response.read()
 	except urllib.error.HTTPError as e:
-		detail = ""
+		body = ""
 		try:
-			detail = e.read().decode("utf-8", "replace")[:500]
+			body = e.read().decode("utf-8", "replace")
 		except Exception:
 			pass
-		log.error("LIMA AI vision HTTP error %s: %s", getattr(e, "code", "?"), detail)
+		if getattr(e, "code", None) == 402:
+			# This cycle's credit is spent. Not an error in the service, so it gets its own
+			# message ("You've used all your LIMA credit...") rather than the generic one.
+			log.info("LIMA AI credit for this cycle is used up: %s", body[:500])
+			raise _credit_exhausted(body) from e
+		log.error("LIMA AI vision HTTP error %s: %s", getattr(e, "code", "?"), body[:500])
 		raise VisionError("api_error") from e
 	except (urllib.error.URLError, TimeoutError, OSError) as e:
 		log.error("LIMA AI vision could not reach the AI service: %r", e)
