@@ -12,8 +12,10 @@ from gui.settingsDialogs import SettingsPanel
 
 import addonHandler
 
+from . import announcements
 from . import auth
 from . import firebase_config
+from . import usage
 
 addonHandler.initTranslation()
 
@@ -177,8 +179,23 @@ class LimaSettingsPanel(SettingsPanel):
 		accountHelper = gui.guiHelper.BoxSizerHelper(self, sizer=accountSizer)
 		helper.addItem(accountHelper)
 		self.accountStatus = accountHelper.addItem(wx.StaticText(accountBox, label=self._account_status()))
+		# Credit usage, the same line NVDA+Alt+U speaks. A read-only edit rather than static
+		# text so it is reached with Tab and read like any field. Worded in the LIMA response
+		# language, like the spoken line, so the two never disagree.
+		self.creditUsage = accountHelper.addLabeledControl(
+			self._usage_label("Credit usage:"), wx.TextCtrl, style=wx.TE_READONLY
+		)
+		# A text field keeps its default width whatever it holds, which cut the line off.
+		# Size it to the widest line it can show in the chosen language, plus room for the
+		# field's own border and margins.
+		widest = max(
+			self.creditUsage.GetTextExtent(sample)[0]
+			for sample in usage.field_samples(self._usage_label, get_language())
+		)
+		self.creditUsage.SetMinSize((widest + self.creditUsage.FromDIP(24), -1))
 		self.signInButton = accountHelper.addItem(wx.Button(accountBox, label=self._button_label()))
 		self.signInButton.Bind(wx.EVT_BUTTON, self.onSignInOut)
+		self._refresh_credit_usage()
 
 		# Translators: label of the web-narration options group in LIMA AI settings.
 		narrationSizer = wx.StaticBoxSizer(wx.StaticBox(self, label=_("Web narration")), wx.VERTICAL)
@@ -217,6 +234,45 @@ class LimaSettingsPanel(SettingsPanel):
 	def _refresh_account_ui(self):
 		self.accountStatus.SetLabel(self._account_status())
 		self.signInButton.SetLabel(self._button_label())
+		self._refresh_credit_usage()
+
+	@staticmethod
+	def _usage_label(message):
+		return announcements.status_text(message, get_language(), _)
+
+	def _refresh_credit_usage(self):
+		"""Show "checking…" and fetch the figure off the GUI thread; hide the line when
+		signed out. Called when the panel opens and after every sign-in or sign-out."""
+		row = self.creditUsage.GetContainingSizer()
+		signed_in = is_signed_in()
+		if row is not None:
+			row.ShowItems(signed_in)
+		self.Layout()
+		if not signed_in:
+			return
+		self.creditUsage.SetValue(usage.usage_text(None, usage.today_utc(), self._usage_label, get_language(), pending=True, field=True))
+		threading.Thread(target=self._fetch_credit_usage, daemon=True).start()
+
+	def _fetch_credit_usage(self):
+		result = None
+		try:
+			result = usage.fetch_credit_usage(get_id_token())
+		except Exception:
+			pass  # shown as "Not available"
+		wx.CallAfter(self._show_credit_usage, result)
+
+	def _show_credit_usage(self, result):
+		# The panel may have closed while the request was out.
+		try:
+			if not self or not self.creditUsage:
+				return
+		except RuntimeError:
+			return
+		line = usage.usage_text(result, usage.today_utc(), self._usage_label, get_language(), field=True)
+		self.creditUsage.SetValue(line)
+		# If the user is already on the field, they heard "checking…"; read the real figure once.
+		if self.creditUsage.HasFocus():
+			ui.message(line)
 
 	def onSignInOut(self, evt):
 		if is_signed_in():

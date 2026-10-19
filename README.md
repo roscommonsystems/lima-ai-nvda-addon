@@ -8,6 +8,7 @@ LIMA AI is the NVDA screen-reader add-on for LIMA (Low-Vision Intelligent Machin
 - **NVDA+Alt+E** — Describe the currently focused element. Captures the focused element's bounding box plus its accessibility information from the tree and sends both to the vision AI.
 - **NVDA+Alt+W** — Toggle dynamic web narration. While on and a browser is focused, NVDA briefly describes changes on the page ("Web page update: …") without interrupting what you are reading, and does not repeat itself.
 - **NVDA+Alt+C** — Click an element you describe. Type what you want to do in plain words ("click the Send button", "open the Downloads folder", "right-click the file"), and LIMA finds the control among the on-screen elements and performs the click. It chooses a single, double, or right click from your wording, and works on buttons, links, menu items, list items, and text fields such as search and address bars.
+- **NVDA+Alt+U** — Announce your credit usage: how much of this month's included AI credit you have used, as a percentage, and when it resets ("Credits used this month: 34% — resets in 4 days"). The same line is shown under **Credit usage** in NVDA menu → Preferences → Settings → LIMA AI.
 - **Announce that the add-on is running** (health check) — no default shortcut; assign one if you want.
 
 The default shortcuts use the `NVDA+Alt` layer so they do not override any built-in NVDA command. You can change or add shortcuts in NVDA menu → Preferences → Input Gestures, under the **LIMA AI** category.
@@ -21,6 +22,12 @@ LIMA AI can reply in **English** (default), **Tagalog**, or **Vietnamese**, chos
 For Tagalog, use a synthesizer that has a Filipino voice. NVDA's built-in **eSpeak NG** supports Filipino: set Settings → Speech → Synthesizer to eSpeak NG. If it sounds too fast, lower the Rate in the same panel and turn off "Rate boost". Windows OneCore voices do not include Filipino, so Tagalog is not pronounced correctly on those.
 
 For Vietnamese, use a synthesizer with a Vietnamese voice, such as **eSpeak NG**, and enable **Automatic language switching** in NVDA's Speech settings. When Vietnamese is selected, command announcements and errors also use Vietnamese, including "Describing screen" and "Web page update". Settings labels and the first-run welcome message follow NVDA's interface language.
+
+The credit usage line (NVDA+Alt+U and the settings field) and the message you hear when your credit for the month is used up are in English, Tagalog and Vietnamese, following the **Language** setting.
+
+## Credit usage
+
+Each plan includes a monthly amount of AI credit. Press **NVDA+Alt+U** to hear how much of it you have used and when it resets. When it is all used, LIMA tells you so and says the date it comes back, instead of a general error. The LIMA backend works out the percentage from your account, so no API key or dollar amount reaches your computer.
 
 ## Clicking elements
 
