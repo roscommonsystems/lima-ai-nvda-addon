@@ -23,14 +23,16 @@ addon_info = AddonInfo(
 	# Translators: Long description to be shown for this add-on on add-on information from add-on store
 	addon_description=_(
 		"LIMA AI is the NVDA add-on companion to the LIMA (Low-Vision Intelligent "
-		"Machine Assistant) desktop app. It describes what is on screen on demand: "
-		"press a shortcut and NVDA speaks a brief AI description of the active monitor."
+		"Machine Assistant) desktop app. Press a shortcut and NVDA speaks a brief AI "
+		"description of the active screen or of the control you are focused on, click "
+		"any on-screen control just by describing it, and toggle live narration of "
+		"changes on a web page. Replies can be in English, Tagalog, or Vietnamese."
 	),
 	# version
-	addon_version="0.3.0",
+	addon_version="0.4.0",
 	# Brief changelog for this version
 	# Translators: what's new content for the add-on version to be shown in the add-on store
-	addon_changelog=_("New Language setting to reply in English or Tagalog; the shortcuts are announced on first run; web narration pre-announcements are customizable (speak, sound, or off) and repeat less during videos."),
+	addon_changelog=_("New: click an on-screen control just by describing it with NVDA+Alt+C (for example 'click the Send button' or 'open the Downloads folder'); describe the currently focused element with NVDA+Alt+E; Vietnamese added to the reply Language setting; and more reliable AI connections."),
 	# Author(s)
 	addon_author="Roscommon Systems",
 	# URL for the add-on documentation support
