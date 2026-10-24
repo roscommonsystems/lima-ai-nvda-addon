@@ -116,6 +116,42 @@ def test_a_402_without_reset_fields_is_still_credit_exhausted(body):
 	assert exc.value.resets_at is None
 
 
+def _http_429(body=b"", headers=None):
+	import io
+	import urllib.error
+	return urllib.error.HTTPError("https://backend.test", 429, "Too Many Requests", headers or {}, io.BytesIO(body))
+
+
+def test_a_429_is_rate_limited_with_the_retry_after_header():
+	"""The backend's rate limit, not a service error: the user is told to wait."""
+	error = _http_429(b'{"message": "rate_limited", "retry_after": 12}', {"Retry-After": "30"})
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_image(b"img", "key", "m", _opener=_fake_opener(raise_exc=error))
+	assert exc.value.code == "rate_limited"
+	assert exc.value.retry_after == 30  # the header wins over the body
+
+
+def test_a_429_without_the_header_reads_the_body():
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_changes(b"a", b"b", "key", _opener=_fake_opener(raise_exc=_http_429(b'{"retry_after": 12}')))
+	assert exc.value.code == "rate_limited"
+	assert exc.value.retry_after == 12
+
+
+@pytest.mark.parametrize("body", [b"", b"not json", b'{"retry_after": "soon"}', b'{"retry_after": 0}', b'{"retry_after": true}'])
+def test_a_429_without_a_usable_wait_is_still_rate_limited(body):
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_image(b"img", "key", "m", _opener=_fake_opener(raise_exc=_http_429(body)))
+	assert exc.value.code == "rate_limited"
+	assert exc.value.retry_after is None
+
+
+def test_select_element_429_is_rate_limited():
+	with pytest.raises(vision.VisionError) as exc:
+		vision.select_element(b"img", "1. OK", "ok", "key", _opener=_fake_opener(raise_exc=_http_429()))
+	assert exc.value.code == "rate_limited"
+
+
 def test_select_element_402_is_credit_exhausted():
 	body = b'{"resets": "monthly", "resets_at": "2026-10-23"}'
 	with pytest.raises(vision.VisionError) as exc:

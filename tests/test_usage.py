@@ -86,6 +86,13 @@ def test_fetch_http_errors_are_unavailable(status):
 	assert usage.fetch_credit_usage("tok", _opener=opener) == {"valid": False, "error": "unavailable"}
 
 
+def test_fetch_rate_limited_is_its_own_code_but_still_reads_not_available():
+	opener = _fake_opener(raise_exc=_http_error(429, b'{"message": "rate_limited", "retry_after": 30}'))
+	result = usage.fetch_credit_usage("tok", _opener=opener)
+	assert result == {"valid": False, "error": "rate_limited"}
+	assert usage.usage_text(result, TODAY, lambda m: m, "en") == "Credits used: Not available"
+
+
 def test_fetch_network_failure_is_network():
 	opener = _fake_opener(raise_exc=urllib.error.URLError("down"))
 	assert usage.fetch_credit_usage("tok", _opener=opener) == {"valid": False, "error": "network"}

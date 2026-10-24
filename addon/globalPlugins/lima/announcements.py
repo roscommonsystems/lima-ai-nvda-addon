@@ -25,6 +25,7 @@ VIETNAMESE = {
 	"Double-clicked {name}.": "Đã nhấp hai lần vào {name}.",
 	"Right-clicked {name}.": "Đã nhấp chuột phải vào {name}.",
 	"The click could not be performed. Please try again.": "Không thể thực hiện thao tác nhấp. Vui lòng thử lại.",
+	"Too many requests. Please wait a moment and try again.": "Quá nhiều yêu cầu. Vui lòng chờ một lát rồi thử lại.",
 	# Credit usage (NVDA+Alt+U, the settings line, and the out-of-credit message).
 	"Credit usage:": "Mức dùng tín dụng:",
 	"Credits used this month: {percent}%": "Tín dụng đã dùng trong tháng này: {percent}%",

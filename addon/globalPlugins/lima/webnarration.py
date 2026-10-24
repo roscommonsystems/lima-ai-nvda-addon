@@ -3,6 +3,7 @@
 # Dependency-injected (no NVDA imports) so it is unit-testable standalone.
 
 import threading
+import time
 
 
 class WebNarrator:
@@ -18,12 +19,17 @@ class WebNarrator:
 	or the user signed out) stops narration and reports `stopped=True`. Anything else
 	(network, a service error, a capture failure) is reported once and narration carries
 	on; the same failure is not repeated every tick, only after a success or a different
-	failure.
+	failure. When the backend's rate limit refuses a call ("rate_limited"), narration sends
+	nothing more until the wait the server asked for has passed.
 	"""
 
 	#: Failures no later tick can recover from, so narration stops instead of failing on
 	#: every interval.
 	STOPPING_CODES = ("credit_exhausted", "signed_out")
+
+	#: The shortest interval narration will run at, whatever the config says. The setting
+	#: is a free float, and an edited nvda.ini could otherwise narrate several times a second.
+	MIN_INTERVAL = 3.0
 
 	def __init__(self, capture, vision, get_token, speak, get_language=lambda: "en", interval=6.0, change_threshold=0.03, on_error=lambda code, error, stopped: None):
 		self._capture = capture
@@ -32,7 +38,7 @@ class WebNarrator:
 		self._speak = speak
 		self._get_language = get_language
 		self._on_error = on_error
-		self._interval = interval
+		self._interval = max(interval, self.MIN_INTERVAL)
 		self._change_threshold = change_threshold
 		self._active = False
 		self._timer = None
@@ -40,6 +46,7 @@ class WebNarrator:
 		self._last_full = None
 		self._last_description = None
 		self._last_error_code = None
+		self._paused_until = 0.0  # time.monotonic() before which no call is sent
 
 	@property
 	def is_active(self):
@@ -58,6 +65,7 @@ class WebNarrator:
 		self._last_full = None
 		self._last_description = None
 		self._last_error_code = None
+		self._paused_until = 0.0
 		self._schedule()
 
 	def stop(self):
@@ -82,6 +90,8 @@ class WebNarrator:
 	def _check_once(self):
 		if not self._active:
 			return
+		if time.monotonic() < self._paused_until:
+			return  # the backend asked us to wait
 		try:
 			if not self._capture.is_browser_title(self._capture.foreground_window_title()):
 				self._last_thumb = None
@@ -111,7 +121,10 @@ class WebNarrator:
 		except Exception as e:
 			# VisionError carries a speakable code; anything else here came from capturing
 			# the screen.
-			self._report(getattr(e, "code", None) or "capture", e)
+			code = getattr(e, "code", None) or "capture"
+			if code == "rate_limited":
+				self._paused_until = time.monotonic() + (getattr(e, "retry_after", None) or self._interval)
+			self._report(code, e)
 
 	def _report(self, code, error):
 		if code in self.STOPPING_CODES:

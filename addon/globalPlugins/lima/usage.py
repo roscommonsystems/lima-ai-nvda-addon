@@ -52,7 +52,7 @@ def fetch_credit_usage(id_token, timeout=15, _opener=None):
 		{"valid": True, "usage_percent": int|None, "plan_tier": str,
 		 "resets": "monthly"|"never"|None, "resets_at": datetime.date|None}
 	and {"valid": False, "error": code} on any failure, where code is "signed_out",
-	"network" or "unavailable".
+	"network", "rate_limited" (the backend's 429) or "unavailable".
 
 	`usage_percent` is None for an uncapped key. Callers show that the same way as a
 	failure: as "Not available", never as 0%.
@@ -88,6 +88,9 @@ def fetch_credit_usage(id_token, timeout=15, _opener=None):
 		except Exception:
 			pass
 		log.debug("LIMA credit usage unavailable (HTTP %s): %s", getattr(e, "code", "?"), detail)
+		if getattr(e, "code", None) == 429:
+			# Still shown as "Not available"; the separate code is for the log and for callers.
+			return {"valid": False, "error": "rate_limited"}
 		return {"valid": False, "error": "unavailable"}
 	except (urllib.error.URLError, TimeoutError, OSError) as e:
 		log.debug("LIMA credit usage could not reach the backend: %r", e)

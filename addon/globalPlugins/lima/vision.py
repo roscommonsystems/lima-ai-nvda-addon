@@ -114,18 +114,22 @@ VISION_PROVIDER = {
 class VisionError(Exception):
 	"""A failure with a stable code the caller maps to a spoken message.
 
-	code is one of: "api_error", "network", "empty", "credit_exhausted".
+	code is one of: "api_error", "network", "empty", "credit_exhausted", "rate_limited".
 
 	For "credit_exhausted" (the backend's 402), `resets` and `resets_at` carry the server's
 	reset policy and YYYY-MM-DD date when it sent them, so the user can be told when their
 	credit comes back.
+
+	For "rate_limited" (the backend's 429), `retry_after` is how many seconds the server
+	asked us to wait, or None when it did not say.
 	"""
 
-	def __init__(self, code, resets=None, resets_at=None):
+	def __init__(self, code, resets=None, resets_at=None, retry_after=None):
 		super().__init__(code)
 		self.code = code
 		self.resets = resets
 		self.resets_at = resets_at
+		self.retry_after = retry_after
 
 
 def _credit_exhausted(raw_body):
@@ -137,6 +141,28 @@ def _credit_exhausted(raw_body):
 	if not isinstance(body, dict):
 		body = {}
 	return VisionError("credit_exhausted", resets=body.get("resets"), resets_at=body.get("resets_at"))
+
+
+def retry_after_seconds(headers, raw_body):
+	"""Seconds a 429 asked us to wait: its Retry-After header, else the body's retry_after.
+	None when it gave neither as a positive whole number."""
+	candidates = [headers.get("Retry-After") if headers is not None else None]
+	try:
+		body = json.loads(raw_body) if raw_body else {}
+	except ValueError:
+		body = {}
+	if isinstance(body, dict):
+		candidates.append(body.get("retry_after"))
+	for value in candidates:
+		if isinstance(value, bool):
+			continue
+		try:
+			seconds = int(value)
+		except (TypeError, ValueError):
+			continue
+		if seconds > 0:
+			return seconds
+	return None
 
 
 def build_payload(image_png_bytes, model=OPENROUTER_VISION_MODEL, prompt=DEFAULT_PROMPT, max_tokens=MAX_TOKENS):
@@ -208,6 +234,12 @@ def _post_and_parse(payload, id_token, timeout, _opener):
 			# message ("You've used all your LIMA credit...") rather than the generic one.
 			log.info("LIMA AI credit for this cycle is used up: %s", body[:500])
 			raise _credit_exhausted(body) from e
+		if getattr(e, "code", None) == 429:
+			# The backend's rate limit: far above anything a person does, so this is usually
+			# a burst of narration plus repeated key presses. Says "wait", not "error".
+			retry_after = retry_after_seconds(getattr(e, "headers", None), body)
+			log.warning("LIMA AI rate limit reached; retry after %s s", retry_after)
+			raise VisionError("rate_limited", retry_after=retry_after) from e
 		log.error("LIMA AI vision HTTP error %s: %s", getattr(e, "code", "?"), body[:500])
 		raise VisionError("api_error") from e
 	except (urllib.error.URLError, TimeoutError, OSError) as e:
