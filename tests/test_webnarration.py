@@ -308,3 +308,74 @@ def test_passes_language_to_describe_changes(language):
 	n._check_once()  # baseline
 	n._check_once()  # change -> describe_changes called with the language
 	assert captured["language"] == language
+
+
+class RateLimitedError(CodedError):
+	"""Stands in for vision.VisionError("rate_limited", retry_after=...)."""
+
+	def __init__(self, retry_after=None):
+		super().__init__("rate_limited")
+		self.retry_after = retry_after
+
+
+class Clock:
+	def __init__(self):
+		self.now = 1000.0
+
+	def __call__(self):
+		return self.now
+
+
+def test_the_interval_is_never_shorter_than_the_minimum():
+	n = webnarration.WebNarrator(None, None, lambda: "key", lambda t: None, interval=0.2)
+	assert n._interval == webnarration.WebNarrator.MIN_INTERVAL
+
+
+def test_a_longer_interval_is_kept():
+	n = webnarration.WebNarrator(None, None, lambda: "key", lambda t: None, interval=10.0)
+	assert n._interval == 10.0
+
+
+def test_rate_limited_pauses_narration_for_the_wait_the_server_asked(monkeypatch):
+	clock = Clock()
+	monkeypatch.setattr(webnarration.time, "monotonic", clock)
+	cap = _browser(3)
+	errors = []
+	n = _make(cap, RaisingVision([RateLimitedError(retry_after=30), "described"]), [], errors)
+	n._active = True
+	n._check_once()  # baseline
+	n._check_once()  # change -> 429
+
+	assert errors == [("rate_limited", False)]  # reported, and narration keeps running
+	assert n.is_active
+
+	clock.now += 29
+	thumbs_left = len(cap._thumbs)
+	n._check_once()  # still inside the wait: nothing captured, nothing sent
+	assert len(cap._thumbs) == thumbs_left
+
+	clock.now += 2
+	n._check_once()  # wait over: checks the screen again
+	assert len(cap._thumbs) == thumbs_left - 1
+
+
+def test_rate_limited_without_a_wait_pauses_for_one_interval(monkeypatch):
+	clock = Clock()
+	monkeypatch.setattr(webnarration.time, "monotonic", clock)
+	n = _make(_browser(2), RaisingVision([RateLimitedError()]), [], [])
+	n._active = True
+	n._check_once()
+	n._check_once()
+	assert n._paused_until == clock.now + 3600  # _make's interval
+
+
+def test_restarting_clears_a_rate_limit_pause(monkeypatch):
+	clock = Clock()
+	monkeypatch.setattr(webnarration.time, "monotonic", clock)
+	n = _make(_browser(2), RaisingVision([RateLimitedError(retry_after=30)]), [], [])
+	n._active = True
+	n._check_once()
+	n._check_once()
+	n.start()
+	n.stop()
+	assert n._paused_until == 0.0

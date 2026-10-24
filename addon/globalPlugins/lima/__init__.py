@@ -177,6 +177,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			"focus": self._status_text("The focused element has no visible location to capture. Move to a control and try again."),
 			# Translators: spoken when the click could not be performed.
 			"click_failed": self._status_text("The click could not be performed. Please try again."),
+			# Translators: spoken when the AI service refuses a request because too many were sent in a short time.
+			"rate_limited": self._status_text("Too many requests. Please wait a moment and try again."),
 		}
 		return messages.get(code, messages["api_error"])
 
