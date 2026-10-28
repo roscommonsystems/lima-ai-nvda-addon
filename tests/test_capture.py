@@ -1,4 +1,5 @@
 import capture
+import pytest
 
 
 def test_scaled_size_no_upscale_when_small():
@@ -89,6 +90,23 @@ def test_expand_and_clamp_fully_outside_returns_none():
 
 def test_expand_and_clamp_zero_sized_rect_is_none():
 	assert capture._expand_and_clamp((10, 10, 0, 20), 6, (0, 0, 1920, 1080)) is None
+
+
+@pytest.mark.parametrize(
+	"monitor, rect, position",
+	[
+		((0, 0, 1920, 1080), (10, 10, 100, 40), "top left"),
+		((0, 0, 1920, 1080), (900, 520, 120, 40), "centre"),
+		((0, 0, 1920, 1080), (1700, 980, 100, 50), "bottom right"),
+		# Partly off the monitor still counts as the nearest part of it.
+		((0, 0, 1920, 1080), (1880, 1040, 200, 200), "bottom right"),
+		# Measured from the active monitor, not the primary one.
+		((1920, 0, 1920, 1080), (1930, 500, 50, 50), "middle left"),
+	],
+)
+def test_screen_position_names_the_part_of_the_screen_the_element_is_in(monkeypatch, monitor, rect, position):
+	monkeypatch.setattr(capture, "_active_monitor_geometry", lambda: monitor)
+	assert capture.screen_position(rect) == position
 
 
 def test_capture_element_png_returns_none_when_off_active_monitor(monkeypatch):

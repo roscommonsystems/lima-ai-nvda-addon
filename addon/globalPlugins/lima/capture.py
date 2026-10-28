@@ -5,7 +5,9 @@ import os
 import tempfile
 
 MAX_DIMENSION = 1280
-PADDING = 6
+# Pixels of screen captured around a described element, so the AI sees what is next to it: its
+# description can cover its layout, and follow-up questions can ask about nearby controls.
+PADDING = 120
 
 BROWSER_IDENTIFIERS = (
 	"chrome", "firefox", "edge", "safari", "opera", "brave",
@@ -160,6 +162,20 @@ def _expand_and_clamp(rect, padding, bounds):
 	if x2 <= x1 or y2 <= y1:
 		return None
 	return (x1, y1, x2 - x1, y2 - y1)
+
+
+def screen_position(rect):
+	"""Where an element's bounding box (left, top, width, height) sits on the active monitor, in
+	words such as "top left", "centre" or "bottom right", so its description can say where it is."""
+	x, y, width, height = _active_monitor_geometry()
+	left, top, element_width, element_height = rect
+	column = min(2, max(0, int(3 * (left + element_width / 2 - x) / width)))
+	row = min(2, max(0, int(3 * (top + element_height / 2 - y) / height)))
+	return (
+		("top left", "top centre", "top right"),
+		("middle left", "centre", "middle right"),
+		("bottom left", "bottom centre", "bottom right"),
+	)[row][column]
 
 
 def capture_element_png(rect, max_dim=MAX_DIMENSION, padding=PADDING):

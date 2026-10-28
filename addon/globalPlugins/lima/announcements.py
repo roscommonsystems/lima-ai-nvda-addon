@@ -5,6 +5,8 @@ VIETNAMESE = {
 	"LIMA AI add-on is running": "Tiện ích LIMA AI đang hoạt động.",
 	"Describing screen.": "Đang mô tả màn hình.",
 	"Describing element.": "Đang mô tả đối tượng đang được chọn.",
+	"Asking LIMA.": "Đang hỏi LIMA.",
+	"The element description is already open.": "Cửa sổ mô tả đối tượng đang mở.",
 	"Sign in with Google in LIMA AI settings to use this feature.": "Hãy đăng nhập bằng Google trong phần cài đặt LIMA AI để sử dụng tính năng này.",
 	"Still describing, please wait.": "Đang mô tả, vui lòng chờ.",
 	"Still describing the previous screen, please wait.": "Đang mô tả màn hình trước đó, vui lòng chờ.",

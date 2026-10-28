@@ -28,16 +28,31 @@ DEFAULT_PROMPT = (
 )
 
 ELEMENT_PROMPT = (
-	"A blind user has focused a UI element with the Tab key. The element's "
-	"accessibility information is given below, and the image shows the element "
-	"cropped from the screen, with a little surrounding context. In one or two "
-	"short, factual sentences, describe the element's visual appearance that the "
-	"accessibility information cannot convey, such as its size, shape, colors, "
-	"icons, or how it sits relative to surrounding content. Do not restate the "
-	"accessibility information or narrate a story."
+	"A blind user has focused a UI element. Its accessibility information, including where it "
+	"is on the screen, is given below, and the image shows the element together with the area "
+	"around it. In a few short, factual sentences, describe the focused element itself: first "
+	"its visual appearance, such as its colour, icon and shape, where it is on the screen, and "
+	"what is next to it; and second what the element is for, what it does, or what happens "
+	"when it is activated. Write plain sentences without Markdown, bullet points or headings, "
+	"since a screen reader reads the reply aloud. Do not narrate a story or repeat these "
+	"instructions."
+)
+
+FOLLOWUP_PROMPT = (
+	"A blind user has focused a UI element and is asking a follow-up question about it or the "
+	"area around it. Its accessibility information is given below, and the image shows the "
+	"element together with the area around it. Answer the question factually from what you can "
+	"see, briefly unless it asks for more detail. Write plain sentences without Markdown, "
+	"bullet points or headings, since a screen reader reads the reply aloud. Do not narrate a "
+	"story or repeat these instructions."
 )
 
 MAX_TOKENS = 150
+
+# The element description and follow-up answers are shown in a window the user can reread, not
+# just spoken, so they get a larger budget than the brief spoken screen description: enough for
+# a few sentences covering both the element's appearance and what it does.
+ELEMENT_MAX_TOKENS = 250
 
 # Bigger budget for the click-by-description selection reply (a short JSON object with the
 # chosen element number and a brief reason), so the number is never cut off.
@@ -269,11 +284,32 @@ def element_prompt(a11y_text):
 	)
 
 
-def describe_element(image_png_bytes, a11y_text, id_token, model=OPENROUTER_VISION_MODEL, max_tokens=MAX_TOKENS, timeout=30, language="en", _opener=None):
+def _plain_text(text):
+	"""Remove the Markdown a model sometimes adds even when asked not to (bullets, headings, bold
+	and italic markers, code ticks), which a screen reader would otherwise read out as symbols."""
+	text = re.sub(r"^[ \t]*(?:[*+-]|#{1,6})[ \t]+", "", text, flags=re.MULTILINE)
+	text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+	text = re.sub(r"\*(?=\S)(.+?)(?<=\S)\*", r"\1", text)
+	return text.replace("`", "").strip()
+
+
+def describe_element(image_png_bytes, a11y_text, id_token, model=OPENROUTER_VISION_MODEL, max_tokens=ELEMENT_MAX_TOKENS, timeout=30, language="en", _opener=None):
 	"""POST a crop of a focused UI element (plus its accessibility information)
 	through the LIMA backend; return the description text."""
 	payload = build_payload(image_png_bytes, model, _localize(element_prompt(a11y_text), language), max_tokens)
-	return _post_and_parse(payload, id_token, timeout,_opener)
+	return _plain_text(_post_and_parse(payload, id_token, timeout, _opener))
+
+
+def answer_element_question(image_png_bytes, a11y_text, question, id_token, model=OPENROUTER_VISION_MODEL, max_tokens=ELEMENT_MAX_TOKENS, timeout=30, language="en", _opener=None):
+	"""POST a crop of a focused UI element, its accessibility information, and the user's
+	follow-up question through the LIMA backend; return the model's answer text."""
+	prompt = (
+		FOLLOWUP_PROMPT
+		+ "\n\nAccessibility information:\n" + a11y_text
+		+ "\n\nQuestion: " + question
+	)
+	payload = build_payload(image_png_bytes, model, _localize(prompt, language), max_tokens)
+	return _plain_text(_post_and_parse(payload, id_token, timeout, _opener))
 
 
 def parse_selection(model_text, count):
