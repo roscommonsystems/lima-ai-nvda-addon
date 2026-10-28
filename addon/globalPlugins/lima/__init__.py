@@ -134,7 +134,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 					"Welcome to LIMA AI. To describe your screen press NVDA+Alt+D, "
 					"to describe the focused element press NVDA+Alt+E, "
 					"to click something by describing it press NVDA+Alt+C, "
-					"and to toggle web narration press NVDA+Alt+W. "
+					"to toggle web narration press NVDA+Alt+W, "
+					"and to hear your credit usage press NVDA+Alt+U. "
 					"You can change these shortcuts in NVDA's Input Gestures."
 				),
 			)
