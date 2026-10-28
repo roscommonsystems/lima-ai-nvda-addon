@@ -108,7 +108,8 @@ class _DescribeResultDialog(wx.Dialog):
 		# accessibility text: the element lost focus to this window, so it can't be recaptured.
 		self.image = image
 		self.context = context
-		# Called with this window and the question when the user asks a follow-up.
+		# Called with this window and the question when the user asks a follow-up; returns whether
+		# the question was sent.
 		self._ask = ask
 		gap = self.FromDIP(8)
 		mainSizer = wx.BoxSizer(wx.VERTICAL)
@@ -161,9 +162,10 @@ class _DescribeResultDialog(wx.Dialog):
 
 	def _on_ask(self, evt):
 		question = self.questionCtrl.GetValue().strip()
-		if question:
+		# Cleared only once the question is sent, so one LIMA refuses (busy, or signed out) can be
+		# sent again without retyping it.
+		if question and self._ask(self, question):
 			self.questionCtrl.Clear()
-			self._ask(self, question)
 
 	def _on_more_details(self, evt):
 		# Translators: the follow-up question the More details button asks LIMA.
@@ -203,8 +205,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		# True only while the click-by-description prompt is on screen, so a second NVDA+Alt+C
 		# press cannot stack a second dialog on top of the first.
 		self._click_prompt_open = False
-		# True while the Describe Element results window is open, so a second NVDA+Alt+E press
-		# cannot stack a second window on top of the first.
+		# True from the moment an element description arrives until its results window closes, so a
+		# second NVDA+Alt+E press cannot stack a second window on top of the first.
 		self._result_window_open = False
 		# True while a click search (enumerate + AI) is running: drives the working tick and lets a
 		# second NVDA+Alt+C cancel it.
@@ -428,6 +430,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		except Exception:
 			pass  # keep the default api_error message
 		finally:
+			if description:
+				# Marked open before the busy flag clears, because the window only appears once the main
+				# thread gets to it; an NVDA+Alt+E press in between then can't start a second one.
+				self._result_window_open = True
 			self._describing = False
 		if description:
 			# Shown in a window the user can reread and ask follow-ups in. Opened with wx.CallAfter,
@@ -444,7 +450,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		# Read the whole description aloud once NVDA has announced the window, as JAWS Picture Smart
 		# does; the field then lets the user reread it at their own pace.
 		core.callLater(_DESCRIBE_READ_DELAY_MS, self._speak_localized, description, locale, Spri.NORMAL, True)
-		self._result_window_open = True
 		try:
 			window.ShowModal()
 		finally:
@@ -454,20 +459,22 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			gui.mainFrame.postPopup()
 
 	def _ask_followup(self, window, question):
-		# Called by the results window when the user asks a follow-up question. The sign-in token
-		# is fetched now, not kept from the description, so a window left open stays usable.
+		# Called by the results window when the user asks a follow-up question; returns whether it
+		# was sent. The sign-in token is fetched now, not kept from the description, so a window
+		# left open stays usable.
 		id_token = settings.get_id_token()
 		if not id_token:
 			self._announce_status(self._error_message("signed_out"))
-			return
+			return False
 		if self._describing or self._searching:
 			self._announce_status(self._error_message("busy"))
-			return
+			return False
 		self._describing = True
 		# Translators: spoken while LIMA answers a follow-up question about the described element.
 		self._announce_status(self._status_text("Asking LIMA."))
 		thread = threading.Thread(target=self._run_followup, args=(window, question, id_token), daemon=True)
 		thread.start()
+		return True
 
 	def _run_followup(self, window, question, id_token):
 		answer = None

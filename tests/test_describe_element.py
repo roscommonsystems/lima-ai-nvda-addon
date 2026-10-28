@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import announcements
+import pytest
 import usage
 import vision
 
@@ -25,6 +26,7 @@ def _load_plugin(namespace, *names):
 	plugin = namespace["GlobalPlugin"]()
 	plugin._describing = True
 	plugin._searching = False
+	plugin._result_window_open = False
 	return plugin
 
 
@@ -69,6 +71,17 @@ def test_a_description_opens_the_results_window_outside_nvdas_queue():
 	assert not plugin._describing
 
 
+def test_describe_element_pressed_before_the_window_appears_opens_no_second_window():
+	# The window opens a moment later on the main thread, so it counts as open from the moment the
+	# description arrives; otherwise a press in between would start a second description.
+	namespace, calls = _nvda(reply="A blue Send button.")
+	plugin = _load_plugin(namespace, "_run_describe_element", "_show_element_result", "script_describeElement")
+	plugin._run_describe_element(b"png", "Role: button", "token")
+	plugin.script_describeElement(None)
+	assert calls.spoken == ["The element description is already open."]
+	assert calls.asked == [((b"png", "Role: button", "token"), {"language": "en"})]
+
+
 def test_a_failed_description_is_spoken_and_opens_no_window():
 	namespace, calls = _nvda(error=vision.VisionError("network"))
 	plugin = _load_plugin(namespace, "_run_describe_element", "_show_element_result")
@@ -78,6 +91,7 @@ def test_a_failed_description_is_spoken_and_opens_no_window():
 		(plugin._speak_localized, "Could not reach the AI service. Check your connection and try again.", None, "normal", True)
 	]
 	assert not plugin._describing
+	assert not plugin._result_window_open
 
 
 def test_the_window_reads_the_description_once_nvda_has_announced_it():
@@ -101,6 +115,7 @@ def test_the_window_reads_the_description_once_nvda_has_announced_it():
 		"core": SimpleNamespace(callLater=lambda delay, *args: events.append(("read after", delay, *args))),
 	})
 	plugin = _load_plugin(namespace, "_show_element_result", "_ask_followup")
+	plugin._result_window_open = True  # marked by the worker when the description arrived
 	plugin._show_element_result("A blue button.", b"png", "Role: button", "vi")
 	assert events == [
 		"prePopup",
@@ -144,10 +159,24 @@ def test_a_failed_followup_is_spoken_but_not_added_to_the_window():
 	assert not plugin._describing
 
 
+def test_a_followup_is_sent_in_the_background_and_reported_as_sent():
+	namespace, calls = _nvda(reply="It is red.")
+	started = []
+	namespace["threading"] = SimpleNamespace(
+		Thread=lambda target, args, daemon: SimpleNamespace(start=lambda: started.append((target, args)))
+	)
+	plugin = _load_plugin(namespace, "_ask_followup", "_run_followup")
+	plugin._describing = False
+	window = _window()
+	assert plugin._ask_followup(window, "what colour is it?") is True
+	assert calls.spoken == ["Asking LIMA."]
+	assert started == [(plugin._run_followup, (window, "what colour is it?", "token"))]
+
+
 def test_a_followup_while_lima_is_busy_says_so_and_asks_nothing():
 	namespace, calls = _nvda(reply="It is red.")
 	plugin = _load_plugin(namespace, "_ask_followup")
-	plugin._ask_followup(_window(), "what colour is it?")
+	assert plugin._ask_followup(_window(), "what colour is it?") is False
 	assert calls.spoken == ["Still describing, please wait."]
 	assert calls.asked == []
 
@@ -157,6 +186,26 @@ def test_a_followup_after_signing_out_asks_to_sign_in():
 	namespace["settings"].get_id_token = lambda: ""
 	plugin = _load_plugin(namespace, "_ask_followup")
 	plugin._describing = False
-	plugin._ask_followup(_window(), "what colour is it?")
+	assert plugin._ask_followup(_window(), "what colour is it?") is False
 	assert calls.spoken == ["Sign in with Google in LIMA AI settings to use this feature."]
 	assert calls.asked == []
+
+
+@pytest.mark.parametrize("sent", [True, False])
+def test_the_question_field_is_cleared_only_once_the_question_is_sent(sent):
+	# A question LIMA refuses (busy, or signed out) stays in the field to send again without retyping.
+	source = Path(announcements.__file__).with_name("__init__.py").read_text(encoding="utf-8")
+	window_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "_DescribeResultDialog")
+	on_ask = next(node for node in window_class.body if isinstance(node, ast.FunctionDef) and node.name == "_on_ask")
+	namespace = {}
+	exec(compile(ast.Module(body=[on_ask], type_ignores=[]), "results_window", "exec"), namespace)
+	asked, cleared = [], []
+
+	def ask(window, question):
+		asked.append(question)
+		return sent
+
+	field = SimpleNamespace(GetValue=lambda: " what colour is it? ", Clear=lambda: cleared.append(True))
+	namespace["_on_ask"](SimpleNamespace(questionCtrl=field, _ask=ask), None)
+	assert asked == ["what colour is it?"]
+	assert cleared == ([True] if sent else [])
