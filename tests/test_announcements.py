@@ -81,6 +81,25 @@ def test_english_credit_lines_use_nvda_translation():
 	assert announcements.status_text("Checking credit usage.", "en", lambda text: "NVDA: " + text) == "NVDA: Checking credit usage."
 
 
+def test_first_run_welcome_names_every_default_shortcut():
+	"""A new default shortcut is easy to leave out of the welcome, and new users then never hear of it."""
+	source = Path(announcements.__file__).with_name("__init__.py").read_text(encoding="utf-8")
+	tree = ast.parse(source)
+	gestures = {
+		keyword.value.value
+		for node in ast.walk(tree)
+		if isinstance(node, ast.Call)
+		for keyword in node.keywords
+		if keyword.arg == "gesture"
+	}
+	welcome = next(
+		node.value for node in ast.walk(tree) if isinstance(node, ast.Constant) and str(node.value).startswith("Welcome to LIMA AI.")
+	)
+	assert gestures == {"kb:NVDA+alt+d", "kb:NVDA+alt+e", "kb:NVDA+alt+c", "kb:NVDA+alt+w", "kb:NVDA+alt+u"}
+	for gesture in gestures:
+		assert "NVDA+Alt+" + gesture[-1].upper() in welcome
+
+
 def test_command_start_and_capture_error_use_vietnamese_speech_and_braille():
 	# Load the real command methods without requiring a running NVDA process.
 	source = Path(announcements.__file__).with_name("__init__.py").read_text(encoding="utf-8")
