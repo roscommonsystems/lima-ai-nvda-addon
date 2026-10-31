@@ -5,7 +5,7 @@ LIMA AI is the NVDA screen-reader add-on for LIMA (Low-Vision Intelligent Machin
 ## Features
 
 - **NVDA+Alt+D** — Describe the current screen. Captures the active monitor, sends it to a vision AI, and NVDA speaks a brief factual description.
-- **NVDA+Alt+E** — Describe the currently focused element. Captures the focused element's bounding box plus its accessibility information from the tree and sends both to the vision AI.
+- **NVDA+Alt+E** — Describe the currently focused element: how it looks and what it does. The description opens in a window you can reread, copy, and ask follow-up questions in.
 - **NVDA+Alt+W** — Toggle dynamic web narration. While on and a browser is focused, NVDA briefly describes changes on the page ("Web page update: …") without interrupting what you are reading, and does not repeat itself.
 - **NVDA+Alt+C** — Click an element you describe. Type what you want to do in plain words ("click the Send button", "open the Downloads folder", "right-click the file"), and LIMA finds the control among the on-screen elements and performs the click. It chooses a single, double, or right click from your wording, and works on buttons, links, menu items, list items, and text fields such as search and address bars.
 - **NVDA+Alt+U** — Announce your credit usage: how much of this month's included AI credit you have used, as a percentage, and when it resets ("Credits used this month: 34% — resets in 4 days"). The same line is shown under **Credit usage** in NVDA menu → Preferences → Settings → LIMA AI.
@@ -28,6 +28,19 @@ The credit usage line (NVDA+Alt+U and the settings field) and the message you he
 ## Credit usage
 
 Each plan includes a monthly amount of AI credit. Press **NVDA+Alt+U** to hear how much of it you have used and when it resets. When it is all used, LIMA tells you so and says the date it comes back, instead of a general error. The LIMA backend works out the percentage from your account, so no API key or dollar amount reaches your computer.
+
+## Describing elements
+
+Press **NVDA+Alt+E** on a control to hear what it looks like and what it does: its colour, icon, where it is on the screen and what is next to it, and what happens when you activate it. LIMA captures the element and the area around it, together with its accessibility information, and sends them to the vision AI.
+
+The description opens in its own window, next to a picture of what was captured, and NVDA reads it as soon as the window appears. The text stays in a read-only field you can reread with the arrow keys and NVDA's review commands. In the same window you can:
+
+- Type a follow-up question about the element or what is around it, such as "what does the plus button next to it do?", and press **Enter** or **Ask**. LIMA answers, reads the answer, and adds it under the description.
+- Press **More details** for a fuller description.
+- Press **Copy** to put the description and answers on the clipboard.
+- Press **Escape** or **Close** to close the window and return to the element.
+
+Only one description window is open at a time: pressing NVDA+Alt+E again while it is open tells you so.
 
 ## Clicking elements
 

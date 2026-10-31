@@ -57,6 +57,17 @@ def test_vietnamese_status_ignores_nvda_interface_language():
 	assert announcements.status_text("Describing screen.", "vi", lambda text: "Other language") == "Đang mô tả màn hình."
 
 
+@pytest.mark.parametrize(
+	"message, vietnamese",
+	[
+		("Asking LIMA.", "Đang hỏi LIMA."),
+		("The element description is already open.", "Cửa sổ mô tả đối tượng đang mở."),
+	],
+)
+def test_describe_element_window_lines_are_spoken_in_vietnamese(message, vietnamese):
+	assert announcements.status_text(message, "vi", lambda text: "Other language") == vietnamese
+
+
 def test_tagalog_credit_lines_use_the_tagalog_table():
 	assert announcements.status_text("Checking credit usage.", "tl", lambda text: "Other language") == "Sinusuri ang paggamit ng credits."
 

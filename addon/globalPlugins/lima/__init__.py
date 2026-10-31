@@ -1,6 +1,7 @@
 # -*- coding: UTF-8 -*-
 # LIMA NVDA add-on: global plugin.
 
+import io
 import logging
 import threading
 import time
@@ -53,6 +54,10 @@ _CLICK_FAIL_TONE = (300, 180)
 _CLICK_WAIT_TONE = (350, 40)
 _CLICK_WAIT_INTERVAL_MS = 800
 
+# How long after the Describe Element window opens to start reading the description aloud, so the
+# reading follows NVDA's own announcement of the window instead of being cancelled by it.
+_DESCRIBE_READ_DELAY_MS = 500
+
 
 class _ClickTargetDialog(wx.Dialog):
 	"""Accessible prompt for the click target, built the way NVDA's own dialogs are.
@@ -85,6 +90,99 @@ class _ClickTargetDialog(wx.Dialog):
 		return self.inputCtrl.GetValue().strip()
 
 
+class _DescribeResultDialog(wx.Dialog):
+	"""Accessible results window for Describe Element, laid out like JAWS Picture Smart Results.
+
+	The captured element is shown beside its description, which sits in a read-only multiline
+	field the user can reread with the arrow keys and NVDA's review commands (line, word,
+	character). Below, a question field asks LIMA a follow-up about the element or the area
+	around it, and More details asks for a fuller description; each question and answer is added
+	to the description field. Copy puts that text on the clipboard. The Close button has the
+	Cancel id, so Escape closes the window too.
+	"""
+
+	def __init__(self, parent, description, image, context, ask):
+		# Translators: title of the Describe Element results window.
+		super().__init__(parent, title=_("LIMA AI element description"), style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+		# The capture this window describes. Follow-up questions are asked about the same image and
+		# accessibility text: the element lost focus to this window, so it can't be recaptured.
+		self.image = image
+		self.context = context
+		# Called with this window and the question when the user asks a follow-up; returns whether
+		# the question was sent.
+		self._ask = ask
+		gap = self.FromDIP(8)
+		mainSizer = wx.BoxSizer(wx.VERTICAL)
+		# The captured element on the left, its description on the right taking any extra room when
+		# the window is resized.
+		resultSizer = wx.BoxSizer(wx.HORIZONTAL)
+		picture = wx.Image(io.BytesIO(image))
+		width, height = capture.scaled_size(picture.GetWidth(), picture.GetHeight(), self.FromDIP(240))
+		thumbnail = picture.Scale(width, height, wx.IMAGE_QUALITY_HIGH)
+		resultSizer.Add(wx.StaticBitmap(self, bitmap=wx.Bitmap(thumbnail)), flag=wx.RIGHT, border=2 * gap)
+		descriptionSizer = wx.BoxSizer(wx.VERTICAL)
+		# Translators: label of the read-only field holding the element description.
+		descriptionSizer.Add(wx.StaticText(self, label=_("Description:")))
+		self.resultCtrl = wx.TextCtrl(self, value=description, style=wx.TE_MULTILINE | wx.TE_READONLY, size=self.FromDIP(wx.Size(520, 260)))
+		descriptionSizer.Add(self.resultCtrl, proportion=1, flag=wx.EXPAND | wx.TOP, border=gap // 2)
+		resultSizer.Add(descriptionSizer, proportion=1, flag=wx.EXPAND)
+		mainSizer.Add(resultSizer, proportion=1, flag=wx.EXPAND | wx.ALL, border=gui.guiHelper.BORDER_FOR_DIALOGS)
+		questionSizer = wx.BoxSizer(wx.HORIZONTAL)
+		# Translators: label of the field for asking a follow-up question about the element.
+		questionSizer.Add(wx.StaticText(self, label=_("Ask a follow-up question:")), flag=wx.ALIGN_CENTER_VERTICAL)
+		self.questionCtrl = wx.TextCtrl(self, style=wx.TE_PROCESS_ENTER)
+		self.questionCtrl.Bind(wx.EVT_TEXT_ENTER, self._on_ask)
+		questionSizer.Add(self.questionCtrl, proportion=1, flag=wx.LEFT | wx.RIGHT, border=gap)
+		# Translators: button that asks LIMA the follow-up question.
+		askButton = wx.Button(self, label=_("&Ask"))
+		askButton.Bind(wx.EVT_BUTTON, self._on_ask)
+		questionSizer.Add(askButton)
+		mainSizer.Add(questionSizer, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=gui.guiHelper.BORDER_FOR_DIALOGS)
+		buttonSizer = wx.BoxSizer(wx.HORIZONTAL)
+		# Translators: button that asks LIMA for a fuller description of the element.
+		moreButton = wx.Button(self, label=_("&More details"))
+		moreButton.Bind(wx.EVT_BUTTON, self._on_more_details)
+		buttonSizer.Add(moreButton)
+		buttonSizer.AddStretchSpacer()
+		# Translators: button that copies the description to the clipboard.
+		copyButton = wx.Button(self, label=_("&Copy"))
+		copyButton.Bind(wx.EVT_BUTTON, self._on_copy)
+		buttonSizer.Add(copyButton)
+		# Translators: button that closes the results window.
+		buttonSizer.Add(wx.Button(self, id=wx.ID_CANCEL, label=_("Cl&ose")), flag=wx.LEFT, border=gap)
+		mainSizer.Add(buttonSizer, flag=wx.EXPAND | wx.ALL, border=gui.guiHelper.BORDER_FOR_DIALOGS)
+		self.SetSizerAndFit(mainSizer)
+		self.CentreOnScreen()
+		# Start in the description so the arrow keys reread it straight away.
+		self.resultCtrl.SetFocus()
+
+	def _on_copy(self, evt):
+		# api.copyToClip announces "Copied to clipboard" itself.
+		api.copyToClip(self.resultCtrl.GetValue(), notify=True)
+
+	def _on_ask(self, evt):
+		question = self.questionCtrl.GetValue().strip()
+		# Cleared only once the question is sent, so one LIMA refuses (busy, or signed out) can be
+		# sent again without retyping it.
+		if question and self._ask(self, question):
+			self.questionCtrl.Clear()
+
+	def _on_more_details(self, evt):
+		# Translators: the follow-up question the More details button asks LIMA.
+		self._ask(self, _("Describe it in more detail."))
+
+	def add_answer(self, question, answer):
+		"""Add a follow-up question and its answer under the description, with the caret at the
+		question, so moving back to the description field reads the new exchange first."""
+		if not self:
+			return  # the window was closed while the answer was on its way
+		self.resultCtrl.AppendText("\n\n")
+		start = self.resultCtrl.GetLastPosition()
+		# Translators: a follow-up question and LIMA's answer, as added to the results window.
+		self.resultCtrl.AppendText(_("Question: {question}\nAnswer: {answer}").format(question=question, answer=answer))
+		self.resultCtrl.SetInsertionPoint(start)
+
+
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	"""Top-level LIMA AI add-on plugin. Holds the add-on's global commands."""
 
@@ -107,6 +205,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		# True only while the click-by-description prompt is on screen, so a second NVDA+Alt+C
 		# press cannot stack a second dialog on top of the first.
 		self._click_prompt_open = False
+		# True from the moment an element description arrives until its results window closes, so a
+		# second NVDA+Alt+E press cannot stack a second window on top of the first.
+		self._result_window_open = False
 		# True while a click search (enumerate + AI) is running: drives the working tick and lets a
 		# second NVDA+Alt+C cancel it.
 		self._searching = False
@@ -280,6 +381,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if self._describing or self._searching:
 			self._announce_status(self._error_message("busy"))
 			return
+		if self._result_window_open:
+			# Translators: spoken when NVDA+Alt+E is pressed while its results window is already open.
+			self._announce_status(self._status_text("The element description is already open."))
+			return
 		obj = self._element_target()
 		if obj is None:
 			self._announce_status(self._error_message("focus"))
@@ -292,11 +397,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			location = getattr(obj, "location", None)
 			if not location:
 				raise ValueError
-			png = capture.capture_element_png(
-				(location.left, location.top, location.width, location.height)
-			)
+			rect = (location.left, location.top, location.width, location.height)
+			png = capture.capture_element_png(rect)
 			if png is None:
 				raise ValueError
+			# The image shows only the area around the element, so say where on the screen it is.
+			context += "\nPosition on screen: " + capture.screen_position(rect)
 		except ValueError:
 				self._describing = False
 				self._announce_status(self._error_message("focus"))
@@ -311,10 +417,72 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		thread.start()
 
 	def _run_describe_element(self, png, context, id_token):
+		description = None
 		message = self._error_message("api_error")
 		locale = "vi" if settings.get_language() == "vi" else None
 		try:
-			message = vision.describe_element(png, context, id_token, language=settings.get_language())
+			description = vision.describe_element(png, context, id_token, language=settings.get_language())
+			locale = _SPEECH_LOCALES.get(settings.get_language())
+		except vision.VisionError as e:
+			message = self._vision_error_message(e)
+			if e.code == "credit_exhausted":
+				locale = _SPEECH_LOCALES.get(settings.get_language())
+		except Exception:
+			pass  # keep the default api_error message
+		finally:
+			if description:
+				# Marked open before the busy flag clears, because the window only appears once the main
+				# thread gets to it; an NVDA+Alt+E press in between then can't start a second one.
+				self._result_window_open = True
+			self._describing = False
+		if description:
+			# Shown in a window the user can reread and ask follow-ups in. Opened with wx.CallAfter,
+			# not NVDA's queue: a modal window opened from NVDA's queue blocks NVDA's core, which then
+			# stops reporting focus and speech for as long as the window is open.
+			wx.CallAfter(self._show_element_result, description, png, context, locale)
+			return
+		# NVDA speech must run on the main thread.
+		queueHandler.queueFunction(queueHandler.eventQueue, self._speak_localized, message, locale, Spri.NORMAL, True)
+
+	def _show_element_result(self, description, png, context, locale):
+		gui.mainFrame.prePopup()
+		window = _DescribeResultDialog(gui.mainFrame, description, png, context, self._ask_followup)
+		# Read the whole description aloud once NVDA has announced the window, as JAWS Picture Smart
+		# does; the field then lets the user reread it at their own pace.
+		core.callLater(_DESCRIBE_READ_DELAY_MS, self._speak_localized, description, locale, Spri.NORMAL, True)
+		try:
+			window.ShowModal()
+		finally:
+			self._result_window_open = False
+			window.Destroy()
+			# Back in the app window, where focus returns to the element that was described.
+			gui.mainFrame.postPopup()
+
+	def _ask_followup(self, window, question):
+		# Called by the results window when the user asks a follow-up question; returns whether it
+		# was sent. The sign-in token is fetched now, not kept from the description, so a window
+		# left open stays usable.
+		id_token = settings.get_id_token()
+		if not id_token:
+			self._announce_status(self._error_message("signed_out"))
+			return False
+		if self._describing or self._searching:
+			self._announce_status(self._error_message("busy"))
+			return False
+		self._describing = True
+		# Translators: spoken while LIMA answers a follow-up question about the described element.
+		self._announce_status(self._status_text("Asking LIMA."))
+		thread = threading.Thread(target=self._run_followup, args=(window, question, id_token), daemon=True)
+		thread.start()
+		return True
+
+	def _run_followup(self, window, question, id_token):
+		answer = None
+		message = self._error_message("api_error")
+		locale = "vi" if settings.get_language() == "vi" else None
+		try:
+			answer = vision.answer_element_question(window.image, window.context, question, id_token, language=settings.get_language())
+			message = answer
 			locale = _SPEECH_LOCALES.get(settings.get_language())
 		except vision.VisionError as e:
 			message = self._vision_error_message(e)
@@ -324,6 +492,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			pass  # keep the default api_error message
 		finally:
 			self._describing = False
+		if answer:
+			wx.CallAfter(window.add_answer, question, answer)
 		# NVDA speech must run on the main thread.
 		queueHandler.queueFunction(queueHandler.eventQueue, self._speak_localized, message, locale, Spri.NORMAL, True)
 

@@ -361,6 +361,76 @@ def test_describe_element_raises_network_code():
 	assert exc.value.code == "network"
 
 
+def test_describe_element_uses_a_larger_token_budget_than_speech():
+	captured = {}
+	@contextmanager
+	def opener(request, timeout=None):
+		captured["body"] = json.loads(request.data.decode("utf-8"))
+		class _Resp:
+			def read(self_inner):
+				return json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode("utf-8")
+		yield _Resp()
+	vision.describe_element(b"img", "Role: button", "key", _opener=opener)
+	assert captured["body"]["max_tokens"] == vision.ELEMENT_MAX_TOKENS
+	assert vision.ELEMENT_MAX_TOKENS > vision.MAX_TOKENS
+
+
+def test_element_prompt_asks_for_visual_details_and_purpose():
+	p = vision.ELEMENT_PROMPT.lower()
+	assert "colour" in p or "color" in p
+	assert "icon" in p
+	assert "activated" in p or "what it does" in p
+
+
+def test_answer_element_question_success_returns_text():
+	raw = json.dumps({"choices": [{"message": {"content": "It is a red circle."}}]}).encode("utf-8")
+	text = vision.answer_element_question(b"img", "Role: button", "what colour is it?", "key", _opener=_fake_opener(raw_bytes=raw))
+	assert text == "It is a red circle."
+
+
+@pytest.mark.parametrize("language, name", [("tl", "Tagalog"), ("vi", "Vietnamese")])
+def test_answer_element_question_threads_question_a11y_and_language(language, name):
+	captured = {}
+	@contextmanager
+	def opener(request, timeout=None):
+		captured["body"] = json.loads(request.data.decode("utf-8"))
+		class _Resp:
+			def read(self_inner):
+				return json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode("utf-8")
+		yield _Resp()
+	vision.answer_element_question(b"img", "Role: slider", "how far along is it?", "key", language=language, _opener=opener)
+	text = captured["body"]["messages"][0]["content"][0]["text"]
+	assert "Role: slider" in text
+	assert "how far along is it?" in text
+	assert f"Respond in {name}." in text
+
+
+def _ask_element(opener):
+	return vision.answer_element_question(b"img", "Role: button", "what is it?", "key", _opener=opener)
+
+
+def _describe_element(opener):
+	return vision.describe_element(b"img", "Role: button", "key", _opener=opener)
+
+
+@pytest.mark.parametrize("request_reply", [_describe_element, _ask_element])
+def test_element_replies_drop_markdown_a_screen_reader_would_read_as_symbols(request_reply):
+	markdown = (
+		"## Comparison\n"
+		"*   **Tomato (left circle):** Red flesh, *Mushy*, Savory.\n"
+		"- Opens with `Ctrl+S`."
+	)
+	raw = json.dumps({"choices": [{"message": {"content": markdown}}]}).encode("utf-8")
+	assert request_reply(_fake_opener(raw_bytes=raw)) == (
+		"Comparison\nTomato (left circle): Red flesh, Mushy, Savory.\nOpens with Ctrl+S."
+	)
+
+
+def test_element_replies_keep_asterisks_that_are_not_markdown():
+	raw = json.dumps({"choices": [{"message": {"content": "Lists files matching *.py and *.txt."}}]}).encode("utf-8")
+	assert _describe_element(_fake_opener(raw_bytes=raw)) == "Lists files matching *.py and *.txt."
+
+
 def test_parse_selection_reads_json_number():
 	assert vision.parse_selection('{"element_number": "2", "reason": "x"}', 5) == (2, "single")
 
