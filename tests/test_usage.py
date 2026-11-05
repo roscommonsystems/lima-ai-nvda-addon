@@ -62,6 +62,11 @@ def test_fetch_returns_the_percentage_and_reset():
 	}
 
 
+def test_fetch_keeps_the_decimals():
+	result = usage.fetch_credit_usage("tok", _opener=_ok({"usage_percent": 34.56}))
+	assert result["usage_percent"] == 34.56
+
+
 def test_fetch_posts_the_id_token_as_a_bearer_token():
 	seen = []
 	usage.fetch_credit_usage("tok-123", _opener=_fake_opener(raw_bytes=b'{"usage_percent": 1}', seen=seen))
@@ -140,20 +145,20 @@ def test_a_reset_date_at_or_before_today_reads_as_a_date():
 
 def test_monthly_with_a_date():
 	line = usage.usage_text(_usage(34, resets_at=TODAY + datetime.timedelta(days=4)), TODAY, _text("en"), "en")
-	assert line == "Credits used this month: 34% — resets in 4 days"
+	assert line == "Credits used this month: 34.00% — resets in 4 days"
 
 
 def test_monthly_without_a_date():
-	assert usage.usage_text(_usage(34), TODAY, _text("en"), "en") == "Credits used this month: 34%"
+	assert usage.usage_text(_usage(34), TODAY, _text("en"), "en") == "Credits used this month: 34.00%"
 
 
 def test_a_key_that_never_resets():
 	line = usage.usage_text(_usage(34, resets="never"), TODAY, _text("en"), "en")
-	assert line == "Credits used: 34% (one-time credit — does not reset)"
+	assert line == "Credits used: 34.00% (one-time credit — does not reset)"
 
 
 def test_an_unknown_policy_still_shows_the_percentage():
-	assert usage.usage_text(_usage(34, resets=None), TODAY, _text("en"), "en") == "Credits used: 34%"
+	assert usage.usage_text(_usage(34, resets=None), TODAY, _text("en"), "en") == "Credits used: 34.00%"
 
 
 @pytest.mark.parametrize("result", [
@@ -171,16 +176,36 @@ def test_pending():
 
 
 def test_zero_percent_is_shown_as_zero():
-	assert usage.usage_text(_usage(0), TODAY, _text("en"), "en") == "Credits used this month: 0%"
+	assert usage.usage_text(_usage(0), TODAY, _text("en"), "en") == "Credits used this month: 0.00%"
+
+
+@pytest.mark.parametrize("percent,shown", [
+	(34.56, "34.56%"),
+	(34.5, "34.50%"),
+	(34, "34.00%"),
+	(99.99, "99.99%"),
+	(100, "100.00%"),
+])
+def test_the_figure_always_has_two_decimal_places(percent, shown):
+	assert usage.usage_text(_usage(percent), TODAY, _text("en"), "en") == "Credits used this month: " + shown
+	assert usage.usage_text(_usage(percent), TODAY, _text("en"), "en", field=True) == shown + " used this month"
+
+
+@pytest.mark.parametrize("language,shown", [("en", "34.25%"), ("tl", "34.25%"), ("vi", "34,25%")])
+def test_only_vietnamese_writes_a_decimal_comma(language, shown):
+	line = usage.usage_text(_usage(34.25), TODAY, _text(language), language)
+	field = usage.usage_text(_usage(34.25), TODAY, _text(language), language, field=True)
+	assert line.endswith(": " + shown)
+	assert shown in field
 
 
 # --- the settings field, which follows the "Credit usage:" label --------------------------
 
 @pytest.mark.parametrize("result,expected", [
-	(_usage(0, resets_at=TODAY + datetime.timedelta(days=5)), "0% used this month — resets in 5 days"),
-	(_usage(34), "34% used this month"),
-	(_usage(34, resets="never"), "34% used (one-time credit — does not reset)"),
-	(_usage(34, resets=None), "34% used"),
+	(_usage(0, resets_at=TODAY + datetime.timedelta(days=5)), "0.00% used this month — resets in 5 days"),
+	(_usage(34), "34.00% used this month"),
+	(_usage(34, resets="never"), "34.00% used (one-time credit — does not reset)"),
+	(_usage(34, resets=None), "34.00% used"),
 	(None, "Not available"),
 ])
 def test_the_field_starts_with_the_figure(result, expected):
@@ -199,32 +224,32 @@ def test_the_field_never_repeats_its_label(language):
 	field = usage.usage_text(_usage(34, resets_at=TODAY + datetime.timedelta(days=4)), TODAY, text, language, field=True)
 	spoken_prefix = text("Credits used this month: {percent}%").split("{percent}")[0].strip()
 	assert spoken_prefix not in field
-	assert field[0].isdigit() or language == "vi"  # vi puts the verb first: "Đã dùng 34%..."
+	assert field[0].isdigit() or language == "vi"  # vi puts the verb first: "Đã dùng 34.00%..."
 	assert label.rstrip(":") not in field
 
 
 @pytest.mark.parametrize("language", ["en", "tl", "vi"])
 def test_the_sizing_samples_are_the_widest_lines(language):
 	"""The panel sizes the field from these, so each must be at least as long as any real
-	line: 100%, worded as a date (not "in N days"), the longest month."""
+	line: 100.00%, worded as a date (not "in N days"), the longest month."""
 	text = _text(language)
 	samples = usage.field_samples(text, language)
 	widest = max(samples, key=len)
 	for days in (1, 4, 20):
-		for percent in (0, 34, 99, 100):
+		for percent in (0, 34.25, 99.99, 100):
 			real = usage.usage_text(_usage(percent, resets_at=TODAY + datetime.timedelta(days=days)), TODAY, text, language, field=True)
 			assert len(real) <= len(widest), real
 	assert usage.usage_text(_usage(100, resets="never"), TODAY, text, language, field=True) in samples
-	assert all("100%" in s for s in samples[:4])
+	assert all(("100,00%" if language == "vi" else "100.00%") in s for s in samples[:4])
 
 
 def test_the_english_sizing_sample():
-	assert usage.field_samples(_text("en"), "en")[0] == "100% used this month — resets September 30"
+	assert usage.field_samples(_text("en"), "en")[0] == "100.00% used this month — resets September 30"
 
 
 @pytest.mark.parametrize("language,expected", [
-	("tl", "34% ang nagamit ngayong buwan — magre-reset sa loob ng 4 araw"),
-	("vi", "Đã dùng 34% trong tháng này — đặt lại sau 4 ngày"),
+	("tl", "34.00% ang nagamit ngayong buwan — magre-reset sa loob ng 4 araw"),
+	("vi", "Đã dùng 34,00% trong tháng này — đặt lại sau 4 ngày"),
 ])
 def test_the_field_in_each_language(language, expected):
 	line = usage.usage_text(_usage(34, resets_at=TODAY + datetime.timedelta(days=4)), TODAY, _text(language), language, field=True)
@@ -234,9 +259,9 @@ def test_the_field_in_each_language(language, expected):
 # --- languages -----------------------------------------------------------------------------
 
 @pytest.mark.parametrize("language,expected", [
-	("en", "Credits used this month: 34% — resets October 30"),
-	("tl", "Nagamit na credits ngayong buwan: 34% — magre-reset sa Oktubre 30"),
-	("vi", "Tín dụng đã dùng trong tháng này: 34% — đặt lại vào ngày 30 tháng 10"),
+	("en", "Credits used this month: 34.00% — resets October 30"),
+	("tl", "Nagamit na credits ngayong buwan: 34.00% — magre-reset sa Oktubre 30"),
+	("vi", "Tín dụng đã dùng trong tháng này: 34,00% — đặt lại vào ngày 30 tháng 10"),
 ])
 def test_the_line_in_each_language(language, expected):
 	line = usage.usage_text(_usage(34, resets_at=datetime.date(2026, 10, 30)), TODAY, _text(language), language)
@@ -244,9 +269,9 @@ def test_the_line_in_each_language(language, expected):
 
 
 @pytest.mark.parametrize("language,expected", [
-	("en", "Credits used this month: 34% — resets in 3 days"),
-	("tl", "Nagamit na credits ngayong buwan: 34% — magre-reset sa loob ng 3 araw"),
-	("vi", "Tín dụng đã dùng trong tháng này: 34% — đặt lại sau 3 ngày"),
+	("en", "Credits used this month: 34.00% — resets in 3 days"),
+	("tl", "Nagamit na credits ngayong buwan: 34.00% — magre-reset sa loob ng 3 araw"),
+	("vi", "Tín dụng đã dùng trong tháng này: 34,00% — đặt lại sau 3 ngày"),
 ])
 def test_soon_in_each_language(language, expected):
 	line = usage.usage_text(_usage(34, resets_at=TODAY + datetime.timedelta(days=3)), TODAY, _text(language), language)
