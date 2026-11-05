@@ -3,7 +3,7 @@
 #
 # Asks the LIMA backend (lima-addon-auth-server POST /usage) how much of the user's
 # included AI credit is spent, and words the answer the way LIMA desktop's Subscription
-# dialog does: "Credits used this month: 34% — resets in 4 days".
+# dialog does: "Credits used this month: 34.25% — resets in 4 days".
 #
 # The server sends a PERCENTAGE and nothing else. It holds the OpenRouter key, the dollar
 # cap and the dollar balance and does the division itself, so none of them reach this
@@ -49,7 +49,7 @@ def fetch_credit_usage(id_token, timeout=15, _opener=None):
 	"""Ask the backend what percentage of this user's included credit is spent.
 
 	Returns, on success:
-		{"valid": True, "usage_percent": int|None, "plan_tier": str,
+		{"valid": True, "usage_percent": float|int|None, "plan_tier": str,
 		 "resets": "monthly"|"never"|None, "resets_at": datetime.date|None}
 	and {"valid": False, "error": code} on any failure, where code is "signed_out",
 	"network", "rate_limited" (the backend's 429) or "unavailable".
@@ -111,7 +111,7 @@ def fetch_credit_usage(id_token, timeout=15, _opener=None):
 
 	return {
 		"valid": True,
-		"usage_percent": int(percent) if percent is not None else None,
+		"usage_percent": percent,
 		"plan_tier": data.get("plan_tier") or "",
 		"resets": reset_policy(data.get("resets")),
 		"resets_at": reset_date(data.get("resets_at")),
@@ -218,6 +218,12 @@ def usage_text(usage, today, text, language, pending=False, field=False):
 	if percent is None:
 		return text(forms["unavailable"])
 
+	# Always two places, including on a whole number or on a server that still sends one.
+	percent = "{:.2f}".format(percent)
+	if language == "vi":
+		# Vietnamese writes a decimal comma; a dot there groups thousands.
+		percent = percent.replace(".", ",")
+
 	resets = usage.get("resets")
 	if resets == RESETS_MONTHLY:
 		line = text(forms["monthly"]).format(percent=percent)
@@ -236,8 +242,8 @@ def field_samples(text, language):
 	"""The longest lines the settings field can show in this language, for sizing it.
 
 	A wx text field does not grow to fit its value, so the panel measures these and sizes
-	the field to the widest. Measured per language because "34% used this month" is
-	half the length of its Tagalog form. 100% and the longest month name (September,
+	the field to the widest. Measured per language because "34.25% used this month" is
+	half the length of its Tagalog form. 100.00% and the longest month name (September,
 	Setyembre; Vietnamese December, "ngày 30 tháng 12") stand in for the widest figures.
 	Every reset wording is included, because which is longest differs by language: in
 	Tagalog "magre-reset sa loob ng 7 araw" is longer than "magre-reset sa Setyembre 30".
