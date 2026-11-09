@@ -68,6 +68,14 @@ def test_describe_element_window_lines_are_spoken_in_vietnamese(message, vietnam
 	assert announcements.status_text(message, "vi", lambda text: "Other language") == vietnamese
 
 
+def test_the_slow_service_message_is_spoken_in_vietnamese():
+	def unexpected_fallback(text):
+		pytest.fail(f"Missing Vietnamese translation for {text!r}")
+
+	translated = announcements.status_text("The AI service is slow right now. Please try again.", "vi", unexpected_fallback)
+	assert translated == "Dịch vụ AI hiện đang phản hồi chậm. Vui lòng thử lại."
+
+
 def test_tagalog_credit_lines_use_the_tagalog_table():
 	assert announcements.status_text("Checking credit usage.", "tl", lambda text: "Other language") == "Sinusuri ang paggamit ng credits."
 

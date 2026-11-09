@@ -281,6 +281,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			"click_failed": self._status_text("The click could not be performed. Please try again."),
 			# Translators: spoken when the AI service refuses a request because too many were sent in a short time.
 			"rate_limited": self._status_text("Too many requests. Please wait a moment and try again."),
+			# Translators: spoken when the AI service is too slow to answer or temporarily failing.
+			"service_slow": self._status_text("The AI service is slow right now. Please try again."),
 		}
 		return messages.get(code, messages["api_error"])
 

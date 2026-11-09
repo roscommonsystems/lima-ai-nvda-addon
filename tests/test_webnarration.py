@@ -166,6 +166,17 @@ def test_the_same_failure_is_reported_once_not_every_interval():
 	assert errors == [("network", False)]
 
 
+def test_a_slow_ai_service_is_reported_once_and_narration_carries_on():
+	"""A slow provider fails every tick for a while; the user hears it once, not every interval."""
+	errors = []
+	n = _make(_browser(4), RaisingVision([CodedError("service_slow")]), [], errors)
+	n._active = True
+	for _ in range(5):
+		n._check_once()
+	assert errors == [("service_slow", False)]
+	assert n.is_active is True
+
+
 def test_a_different_failure_is_reported():
 	errors = []
 	n = _make(_browser(2), RaisingVision([CodedError("network"), CodedError("api_error")]), [], errors)

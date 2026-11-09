@@ -159,6 +159,17 @@ def test_a_failed_followup_is_spoken_but_not_added_to_the_window():
 	assert not plugin._describing
 
 
+def test_a_slow_ai_service_is_spoken_as_slow_not_as_an_error():
+	namespace, calls = _nvda(error=vision.VisionError("service_slow"))
+	plugin = _load_plugin(namespace, "_run_describe_element", "_show_element_result")
+	plugin._run_describe_element(b"png", "Role: button", "token")
+	assert calls.after == []
+	assert calls.queued == [
+		(plugin._speak_localized, "The AI service is slow right now. Please try again.", None, "normal", True)
+	]
+	assert not plugin._describing
+
+
 def test_a_followup_is_sent_in_the_background_and_reported_as_sent():
 	namespace, calls = _nvda(reply="It is red.")
 	started = []
