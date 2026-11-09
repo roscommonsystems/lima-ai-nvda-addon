@@ -146,6 +146,49 @@ def test_a_429_without_a_usable_wait_is_still_rate_limited(body):
 	assert exc.value.retry_after is None
 
 
+def _http_error(status, body=b""):
+	import io
+	import urllib.error
+	return urllib.error.HTTPError("https://backend.test", status, "Error", {}, io.BytesIO(body))
+
+
+@pytest.mark.parametrize("status, body", [
+	(504, b'{"message": "upstream_timeout"}'),  # the backend stopped waiting on the provider
+	(504, b""),  # Cloud Run's own 504, from a backend without the deadline
+	(502, b'{"message": "Upstream AI service unreachable"}'),
+])
+def test_a_slow_or_failing_provider_is_service_slow_not_a_generic_error(status, body):
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_image(b"img", "key", "m", _opener=_fake_opener(raise_exc=_http_error(status, body)))
+	assert exc.value.code == "service_slow"
+
+
+@pytest.mark.parametrize("request_ai", [
+	lambda opener: vision.describe_element(b"img", "Role: button", "key", _opener=opener),
+	lambda opener: vision.answer_element_question(b"img", "Role: button", "what is it?", "key", _opener=opener),
+	lambda opener: vision.select_element(b"img", "1. OK", "ok", "key", _opener=opener),
+	lambda opener: vision.describe_changes(b"a", b"b", "key", _opener=opener),
+])
+def test_every_ai_command_reports_a_504_as_service_slow(request_ai):
+	with pytest.raises(vision.VisionError) as exc:
+		request_ai(_fake_opener(raise_exc=_http_error(504, b'{"message": "upstream_timeout"}')))
+	assert exc.value.code == "service_slow"
+
+
+@pytest.mark.parametrize("status", [400, 401, 500])
+def test_other_http_errors_stay_api_error(status):
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_image(b"img", "key", "m", _opener=_fake_opener(raise_exc=_http_error(status)))
+	assert exc.value.code == "api_error"
+
+
+def test_the_add_ons_own_timeout_still_says_network():
+	"""The backend answers within 25 s, so no answer in 30 s points at the connection."""
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_image(b"img", "key", "m", _opener=_fake_opener(raise_exc=TimeoutError("timed out")))
+	assert exc.value.code == "network"
+
+
 def test_select_element_429_is_rate_limited():
 	with pytest.raises(vision.VisionError) as exc:
 		vision.select_element(b"img", "1. OK", "ok", "key", _opener=_fake_opener(raise_exc=_http_429()))

@@ -129,7 +129,12 @@ VISION_PROVIDER = {
 class VisionError(Exception):
 	"""A failure with a stable code the caller maps to a spoken message.
 
-	code is one of: "api_error", "network", "empty", "credit_exhausted", "rate_limited".
+	code is one of: "api_error", "network", "empty", "credit_exhausted", "rate_limited",
+	"service_slow".
+
+	"service_slow" is the backend's 504 (it stopped waiting on the AI provider, with
+	{"message": "upstream_timeout"}) or 502 (the provider failed or could not be reached).
+	Neither is the user's fault or their connection's, and trying again shortly usually works.
 
 	For "credit_exhausted" (the backend's 402), `resets` and `resets_at` carry the server's
 	reset policy and YYYY-MM-DD date when it sent them, so the user can be told when their
@@ -255,6 +260,12 @@ def _post_and_parse(payload, id_token, timeout, _opener):
 			retry_after = retry_after_seconds(getattr(e, "headers", None), body)
 			log.warning("LIMA AI rate limit reached; retry after %s s", retry_after)
 			raise VisionError("rate_limited", retry_after=retry_after) from e
+		if getattr(e, "code", None) in (502, 504):
+			# The AI provider behind the backend is slow or failing. The backend answers 504
+			# itself before this request's timeout, so the user hears "slow, try again"
+			# rather than waiting out the timeout and being told to check their connection.
+			log.warning("LIMA AI service is slow or unavailable (HTTP %s): %s", e.code, body[:500])
+			raise VisionError("service_slow") from e
 		log.error("LIMA AI vision HTTP error %s: %s", getattr(e, "code", "?"), body[:500])
 		raise VisionError("api_error") from e
 	except (urllib.error.URLError, TimeoutError, OSError) as e:
