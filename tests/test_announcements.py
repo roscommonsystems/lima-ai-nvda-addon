@@ -134,7 +134,7 @@ def test_command_start_and_capture_error_use_vietnamese_speech_and_braille():
 		"ui": SimpleNamespace(message=ui_calls.append),
 		"capture": SimpleNamespace(capture_screen_png=fail_capture),
 	}
-	exec(compile(ast.Module(body=[plugin_class], type_ignores=[]), "plugin_commands", "exec"), namespace)
+	exec(compile(ast.Module(body=[plugin_class], type_ignores=[]), "plugin_commands", "exec"), namespace)  # nosec B102  # executes AST parsed from this repo's plugin source, no external input
 	plugin = namespace["GlobalPlugin"]()
 	plugin._describing = False
 	plugin._searching = False
@@ -179,7 +179,7 @@ def test_spent_credit_is_spoken_in_tagalog_with_the_reset_date():
 		"braille": SimpleNamespace(handler=SimpleNamespace(message=braille_calls.append)),
 		"queueHandler": SimpleNamespace(eventQueue=None, queueFunction=lambda queue, fn, *args: fn(*args)),
 	}
-	exec(compile(ast.Module(body=[plugin_class], type_ignores=[]), "plugin_commands", "exec"), namespace)
+	exec(compile(ast.Module(body=[plugin_class], type_ignores=[]), "plugin_commands", "exec"), namespace)  # nosec B102  # executes AST parsed from this repo's plugin source, no external input
 	plugin = namespace["GlobalPlugin"]()
 	plugin._describing = True
 	plugin._run_describe(b"png", "token")
