@@ -22,7 +22,7 @@ def _load_plugin(namespace, *names):
 	for method in plugin_class.body:
 		method.decorator_list = []
 	plugin_class.bases = []
-	exec(compile(ast.Module(body=[plugin_class], type_ignores=[]), "plugin_commands", "exec"), namespace)
+	exec(compile(ast.Module(body=[plugin_class], type_ignores=[]), "plugin_commands", "exec"), namespace)  # nosec B102  # executes AST parsed from this repo's plugin source, no external input
 	plugin = namespace["GlobalPlugin"]()
 	plugin._describing = True
 	plugin._searching = False
@@ -209,7 +209,7 @@ def test_the_question_field_is_cleared_only_once_the_question_is_sent(sent):
 	window_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "_DescribeResultDialog")
 	on_ask = next(node for node in window_class.body if isinstance(node, ast.FunctionDef) and node.name == "_on_ask")
 	namespace = {}
-	exec(compile(ast.Module(body=[on_ask], type_ignores=[]), "results_window", "exec"), namespace)
+	exec(compile(ast.Module(body=[on_ask], type_ignores=[]), "results_window", "exec"), namespace)  # nosec B102  # executes AST parsed from this repo's plugin source, no external input
 	asked, cleared = [], []
 
 	def ask(window, question):
