@@ -21,6 +21,11 @@ log = logging.getLogger(__name__)
 # used to live here, a second copy of the URL that silently went stale.
 ENDPOINT_URL = None
 
+# This computer's anonymous ID (signup.device_id()), sent as X-LIMA-Device so the backend can
+# limit new free accounts per computer. Assigned by the plugin at init, like ENDPOINT_URL;
+# empty means the header is left off, which the backend accepts.
+DEVICE_ID = ""
+
 DEFAULT_PROMPT = (
 	"Describe what is on the screen for a blind user in at most 2 to 3 short, "
 	"factual sentences. Name the main elements and any important visible text. "
@@ -130,7 +135,14 @@ class VisionError(Exception):
 	"""A failure with a stable code the caller maps to a spoken message.
 
 	code is one of: "api_error", "network", "empty", "credit_exhausted", "rate_limited",
-	"service_slow".
+	"service_slow", "signup_not_allowed", "signup_limited", "session_expired".
+
+	"session_expired" is the backend's 401, or a 403 other than signup_not_allowed: it no
+	longer accepts this sign-in, and signing in again is what fixes it.
+
+	"signup_not_allowed" (the backend's 403) and "signup_limited" (its 429 with that message)
+	come from the backend's signup guard, on a free user's first request: see signup.py.
+	"signup_limited" carries `reason` ("device", "ip" or "global") and `retry_after`.
 
 	"service_slow" is the backend's 504 (it stopped waiting on the AI provider, with
 	{"message": "upstream_timeout"}) or 502 (the provider failed or could not be reached).
@@ -144,12 +156,31 @@ class VisionError(Exception):
 	asked us to wait, or None when it did not say.
 	"""
 
-	def __init__(self, code, resets=None, resets_at=None, retry_after=None):
+	def __init__(self, code, resets=None, resets_at=None, retry_after=None, reason=None):
 		super().__init__(code)
 		self.code = code
 		self.resets = resets
 		self.resets_at = resets_at
 		self.retry_after = retry_after
+		self.reason = reason
+
+
+def body_field(raw_body, name):
+	"""One string field of a JSON error body, or "" when the body is not JSON or lacks it."""
+	try:
+		body = json.loads(raw_body) if raw_body else {}
+	except ValueError:
+		return ""
+	value = body.get(name) if isinstance(body, dict) else None
+	return value if isinstance(value, str) else ""
+
+
+def request_headers(id_token):
+	"""Headers for a call to the LIMA backend: the user's token, and the device ID if known."""
+	headers = {"Authorization": "Bearer " + id_token, "Content-Type": "application/json"}
+	if DEVICE_ID:
+		headers["X-LIMA-Device"] = DEVICE_ID
+	return headers
 
 
 def _credit_exhausted(raw_body):
@@ -233,10 +264,7 @@ def _post_and_parse(payload, id_token, timeout, _opener):
 	request = urllib.request.Request(
 		ENDPOINT_URL,
 		data=data,
-		headers={
-			"Authorization": "Bearer " + id_token,
-			"Content-Type": "application/json",
-		},
+		headers=request_headers(id_token),
 		method="POST",
 	)
 	opener = _opener or urllib.request.urlopen
@@ -254,6 +282,23 @@ def _post_and_parse(payload, id_token, timeout, _opener):
 			# message ("You've used all your LIMA credit...") rather than the generic one.
 			log.info("LIMA AI credit for this cycle is used up: %s", body[:500])
 			raise _credit_exhausted(body) from e
+		if getattr(e, "code", None) == 403 and body_field(body, "message") == "signup_not_allowed":
+			# The backend will not give this Google account a free account (a disposable
+			# address). Another account will work, so this says that rather than "error".
+			log.info("LIMA AI sign-up refused for this account: %s", body[:300])
+			raise VisionError("signup_not_allowed") from e
+		if getattr(e, "code", None) in (401, 403):
+			# The backend no longer accepts this sign-in: expired or revoked (401), or the account
+			# is refused outright (403: email not verified, a non-Google sign-in). Signing in again
+			# is the fix, so it says that rather than "The AI service returned an error."
+			log.warning("LIMA AI sign-in rejected (HTTP %s): %s", e.code, body[:300])
+			raise VisionError("session_expired") from e
+		if getattr(e, "code", None) == 429 and body_field(body, "message") == "signup_limited":
+			# Too many new accounts from this computer, network, or everyone today. The wait
+			# can be hours, so it is named rather than folded into "wait a moment".
+			retry_after = retry_after_seconds(getattr(e, "headers", None), body)
+			log.info("LIMA AI sign-up limited (%s); retry after %s s", body_field(body, "reason"), retry_after)
+			raise VisionError("signup_limited", retry_after=retry_after, reason=body_field(body, "reason")) from e
 		if getattr(e, "code", None) == 429:
 			# The backend's rate limit: far above anything a person does, so this is usually
 			# a burst of narration plus repeated key presses. Says "wait", not "error".

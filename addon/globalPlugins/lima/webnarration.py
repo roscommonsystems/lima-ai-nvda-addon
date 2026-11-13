@@ -24,8 +24,9 @@ class WebNarrator:
 	"""
 
 	#: Failures no later tick can recover from, so narration stops instead of failing on
-	#: every interval.
-	STOPPING_CODES = ("credit_exhausted", "signed_out")
+	#: every interval. The two signup refusals (see signup.py) are among them: one needs a
+	#: different Google account, the other a wait that can run to hours.
+	STOPPING_CODES = ("credit_exhausted", "signed_out", "signup_not_allowed", "signup_limited", "session_expired")
 
 	#: The shortest interval narration will run at, whatever the config says. The setting
 	#: is a free float, and an edited nvda.ini could otherwise narrate several times a second.

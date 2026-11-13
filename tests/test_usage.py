@@ -85,7 +85,8 @@ def test_fetch_without_an_endpoint_is_unavailable(monkeypatch):
 	assert usage.fetch_credit_usage("tok", _opener=_ok({}))["error"] == "unavailable"
 
 
-@pytest.mark.parametrize("status", [401, 403, 404, 500, 502])
+# 401 and 403 are not here: they mean "sign in again" (session_expired, see test_signup.py).
+@pytest.mark.parametrize("status", [404, 500, 502])
 def test_fetch_http_errors_are_unavailable(status):
 	opener = _fake_opener(raise_exc=_http_error(status, b'{"message": "no_key_provisioned"}'))
 	assert usage.fetch_credit_usage("tok", _opener=opener) == {"valid": False, "error": "unavailable"}

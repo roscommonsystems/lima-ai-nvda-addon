@@ -33,6 +33,7 @@ from . import uielements
 from . import mouseclick
 from . import announcements
 from . import usage
+from . import signup
 
 addonHandler.initTranslation()
 
@@ -43,6 +44,11 @@ log = logging.getLogger(__name__)
 # with that language's voice (needs a synth that supports it, e.g. eSpeak NG has Filipino).
 # English is absent: the reply is already in the default voice's language.
 _SPEECH_LOCALES = {"tl": "fil", "vi": "vi"}
+
+# VisionError codes whose message is translated into every LIMA language (Tagalog included),
+# so it is spoken in that language's voice: a spent credit, the backend's two signup
+# refusals (signup.py), and a sign-in it no longer accepts.
+_TRANSLATED_CODES = ("credit_exhausted", "signup_not_allowed", "signup_limited", "session_expired")
 
 # Earcons for the click command, so a blind user hears what is happening before the words: a
 # short tone when the search starts, a higher tone when the click succeeds, and a lower, longer
@@ -198,6 +204,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		# Credit usage comes from the same backend, which holds the key and reads it from
 		# OpenRouter; only the percentage comes back.
 		usage.ENDPOINT_URL = firebase_config.LIMA_BACKEND_URL + "/usage"
+		# An anonymous per-computer ID (a one-way hash; see signup.device_id) that lets the
+		# backend limit new free accounts per computer. Read once: it does not change while
+		# NVDA runs, and "" just leaves the header off.
+		vision.DEVICE_ID = usage.DEVICE_ID = signup.device_id()
 		gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(settings.LimaSettingsPanel)
 		self._describing = False
 		# True while NVDA+Alt+U is waiting on the backend, so repeat presses do not stack requests.
@@ -236,7 +246,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 					"to describe the focused element press NVDA+Alt+E, "
 					"to click something by describing it press NVDA+Alt+C, "
 					"to toggle web narration press NVDA+Alt+W, "
-					"and to hear your credit usage press NVDA+Alt+U. "
+					"to hear your credit usage press NVDA+Alt+U, "
+					"and to sign in or out press NVDA+Alt+A. "
 					"You can change these shortcuts in NVDA's Input Gestures."
 				),
 			)
@@ -263,8 +274,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	# Spoken messages for each failure code (kept here so vision.py stays NVDA-free).
 	def _error_message(self, code):
 		messages = {
-			# Translators: spoken when the user is not signed in.
-			"signed_out": self._status_text("Sign in with Google in LIMA AI settings to use this feature."),
+			# Translators: spoken when the user is not signed in. NVDA+Alt+A opens LIMA AI settings.
+			"signed_out": self._status_text("You are not signed in to LIMA AI. Press NVDA+Alt+A to sign in with Google."),
+			# Translators: spoken when the backend no longer accepts the user's sign-in (expired,
+			# revoked, or the email is not verified); the add-on has signed them out.
+			"session_expired": self._status_text("Your LIMA AI sign-in is no longer valid, so you have been signed out. Press NVDA+Alt+A to sign in again."),
 			# Translators: spoken when a description is already in progress.
 			"busy": self._status_text("Still describing, please wait."),
 			# Translators: spoken when the screen could not be captured.
@@ -286,9 +300,24 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		}
 		return messages.get(code, messages["api_error"])
 
+	def _sign_out_if_needed(self, code):
+		"""Sign out a session that cannot be used, as LIMA Desktop does: a Google account the
+		backend will never give a free account, or a sign-in the backend no longer accepts.
+		Left signed in, every command would repeat the same failure; signed out, NVDA+Alt+A
+		opens a settings page that offers "Sign in with Google" rather than "Sign out".
+
+		Queued because NVDA's config is changed on the main thread only, and this is reached
+		from the worker threads too."""
+		if code in (signup.SIGNUP_NOT_ALLOWED, "session_expired"):
+			queueHandler.queueFunction(queueHandler.eventQueue, settings.clear_session)
+
 	def _vision_error_message(self, error):
 		"""The spoken message for a VisionError. A spent credit says when it comes back,
 		using the reset date the backend sent with its 402."""
+		self._sign_out_if_needed(error.code)
+		refusal = signup.refusal_message(error.code, error.reason, error.retry_after, self._status_text)
+		if refusal:
+			return refusal
 		if error.code == "credit_exhausted":
 			return usage.limit_message(
 				usage.reset_policy(error.resets),
@@ -311,7 +340,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			ui.message(text)
 
 	# Default gestures use the NVDA+Alt layer (D: describe screen, E: describe focused element, W:
-	# web narration, C: click by description, U: credit usage), which NVDA core leaves free apart
+	# web narration, C: click by description, U: credit usage, A: account), which NVDA core leaves free apart
 	# from the braille auto-scroll keys
 	# (J/K/L). We deliberately avoid NVDA+Shift+D and similar,
 	# because those already map to NVDA commands (NVDA+Shift+D is the audio-ducking toggle).
@@ -361,7 +390,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			locale = _SPEECH_LOCALES.get(settings.get_language())
 		except vision.VisionError as e:
 			message = self._vision_error_message(e)
-			if e.code == "credit_exhausted":
+			if e.code in _TRANSLATED_CODES:
 				# Translated into every LIMA language, so it is spoken in that language's voice.
 				locale = _SPEECH_LOCALES.get(settings.get_language())
 		except Exception:
@@ -428,7 +457,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			locale = _SPEECH_LOCALES.get(settings.get_language())
 		except vision.VisionError as e:
 			message = self._vision_error_message(e)
-			if e.code == "credit_exhausted":
+			if e.code in _TRANSLATED_CODES:
 				locale = _SPEECH_LOCALES.get(settings.get_language())
 		except Exception:
 			pass  # keep the default api_error message
@@ -489,7 +518,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			locale = _SPEECH_LOCALES.get(settings.get_language())
 		except vision.VisionError as e:
 			message = self._vision_error_message(e)
-			if e.code == "credit_exhausted":
+			if e.code in _TRANSLATED_CODES:
 				locale = _SPEECH_LOCALES.get(settings.get_language())
 		except Exception:
 			pass  # keep the default api_error message
@@ -612,7 +641,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def _report_narration_failure(self, code, error, stopped):
 		"""Tell the user why narration failed. The narrator reports each failure once, not
 		every interval, and stops by itself when the credit is used up or the user signed out."""
-		if code == "credit_exhausted" and error is not None:
+		if code in _TRANSLATED_CODES and error is not None:
 			self._announce_translated(self._vision_error_message(error))
 		else:
 			self._announce_status(self._error_message(code))
@@ -674,9 +703,35 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			log.exception("LIMA credit usage check failed")
 		finally:
 			self._checking_usage = False
-		line = usage.usage_text(result, usage.today_utc(), self._status_text, settings.get_language())
+		line = None
+		if result and not result.get("valid"):
+			# A first-time user's /usage provisions their key, so it can meet the signup guard.
+			# "Not available" would hide why; say what happened and what to do.
+			self._sign_out_if_needed(result.get("error"))
+			line = signup.refusal_message(
+				result.get("error"), result.get("reason"), result.get("retry_after"), self._status_text
+			)
+			if line is None and result.get("error") == "session_expired":
+				line = self._error_message("session_expired")
+		if line is None:
+			line = usage.usage_text(result, usage.today_utc(), self._status_text, settings.get_language())
 		# NVDA speech must run on the main thread.
 		queueHandler.queueFunction(queueHandler.eventQueue, self._announce_translated, line)
+
+	# Account. Opens LIMA AI's page in NVDA's settings, where the user signs in or out with
+	# Google. Every message that needs a sign-in ends "Press NVDA+Alt+A to sign in": the user is
+	# told what is wrong and decides when to act, rather than having a settings window take focus
+	# from whatever they were doing. A for Account; J/K/L on this layer are NVDA's braille
+	# auto-scroll keys.
+	@script(
+		# Translators: Description of the command that opens LIMA AI's account settings.
+		description=_("Opens LIMA AI settings, to sign in or out with Google."),
+		gesture="kb:NVDA+alt+a",
+	)
+	def script_openAccountSettings(self, gesture):
+		wx.CallAfter(
+			gui.mainFrame.popupSettingsDialog, gui.settingsDialogs.NVDASettingsDialog, settings.LimaSettingsPanel
+		)
 
 	# Click by description. The user describes what to do in plain words ("open the Downloads
 	# folder", "click the Send button", "right-click the file"); LIMA enumerates the on-screen
@@ -804,7 +859,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if error == "no_elements":
 			# Translators: spoken when nothing clickable was found on screen.
 			failure = self._status_text("I could not find anything to click here.")
-		elif isinstance(error, vision.VisionError) and error.code == "credit_exhausted":
+		elif isinstance(error, vision.VisionError) and error.code in _TRANSLATED_CODES:
 			tones.beep(*_CLICK_FAIL_TONE)
 			self._announce_translated(self._vision_error_message(error))
 			return

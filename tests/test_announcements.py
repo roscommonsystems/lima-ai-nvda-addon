@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import announcements
+import signup
 
 
 CLICK_MESSAGES = [
@@ -103,7 +104,7 @@ def test_first_run_welcome_names_every_default_shortcut():
 	welcome = next(
 		node.value for node in ast.walk(tree) if isinstance(node, ast.Constant) and str(node.value).startswith("Welcome to LIMA AI.")
 	)
-	assert gestures == {"kb:NVDA+alt+d", "kb:NVDA+alt+e", "kb:NVDA+alt+c", "kb:NVDA+alt+w", "kb:NVDA+alt+u"}
+	assert gestures == {"kb:NVDA+alt+d", "kb:NVDA+alt+e", "kb:NVDA+alt+c", "kb:NVDA+alt+w", "kb:NVDA+alt+u", "kb:NVDA+alt+a"}
 	for gesture in gestures:
 		assert "NVDA+Alt+" + gesture[-1].upper() in welcome
 
@@ -155,7 +156,7 @@ def test_spent_credit_is_spoken_in_tagalog_with_the_reset_date():
 
 	source = Path(announcements.__file__).with_name("__init__.py").read_text(encoding="utf-8")
 	plugin_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin")
-	names = {"_status_text", "_speak_localized", "_error_message", "_vision_error_message", "_run_describe"}
+	names = {"_status_text", "_speak_localized", "_error_message", "_vision_error_message", "_sign_out_if_needed", "_run_describe"}
 	methods = [node for node in plugin_class.body if isinstance(node, ast.FunctionDef) and node.name in names]
 	for method in methods:
 		method.decorator_list = []
@@ -172,6 +173,8 @@ def test_spent_credit_is_spoken_in_tagalog_with_the_reset_date():
 		"vision": SimpleNamespace(VisionError=vision.VisionError, describe_image=spent),
 		"settings": SimpleNamespace(get_language=lambda: "tl"),
 		"_SPEECH_LOCALES": {"tl": "fil", "vi": "vi"},
+		"_TRANSLATED_CODES": ("credit_exhausted", "signup_not_allowed", "signup_limited"),
+		"signup": signup,
 		"_": lambda text: text,
 		"Spri": SimpleNamespace(NORMAL="normal"),
 		"LangChangeCommand": lambda locale: ("language", locale),
@@ -187,3 +190,162 @@ def test_spent_credit_is_spoken_in_tagalog_with_the_reset_date():
 	assert speech_calls == [([("language", "fil"), expected], "normal")]
 	assert braille_calls == [expected]
 	assert not plugin._describing
+
+
+def test_a_signup_refusal_is_spoken_in_tagalog_with_the_wait():
+	"""The backend's signup guard refusing a first description: said in Tagalog, in the Filipino
+	voice, with the wait in words - not as "The AI service returned an error."."""
+	import usage
+	import vision
+
+	source = Path(announcements.__file__).with_name("__init__.py").read_text(encoding="utf-8")
+	plugin_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin")
+	names = {"_status_text", "_speak_localized", "_error_message", "_vision_error_message", "_sign_out_if_needed", "_run_describe"}
+	methods = [node for node in plugin_class.body if isinstance(node, ast.FunctionDef) and node.name in names]
+	for method in methods:
+		method.decorator_list = []
+	plugin_class.bases = []
+	plugin_class.body = methods
+	speech_calls, braille_calls = [], []
+
+	def spent(png, id_token, language=None):
+		raise vision.VisionError("signup_limited", retry_after=7200, reason="device")
+
+	namespace = {
+		"announcements": announcements,
+		"usage": usage,
+		"vision": SimpleNamespace(VisionError=vision.VisionError, describe_image=spent),
+		"settings": SimpleNamespace(get_language=lambda: "tl"),
+		"_SPEECH_LOCALES": {"tl": "fil", "vi": "vi"},
+		"_TRANSLATED_CODES": ("credit_exhausted", "signup_not_allowed", "signup_limited"),
+		"signup": signup,
+		"_": lambda text: text,
+		"Spri": SimpleNamespace(NORMAL="normal"),
+		"LangChangeCommand": lambda locale: ("language", locale),
+		"speech": SimpleNamespace(speak=lambda sequence, priority: speech_calls.append((sequence, priority))),
+		"braille": SimpleNamespace(handler=SimpleNamespace(message=braille_calls.append)),
+		"queueHandler": SimpleNamespace(eventQueue=None, queueFunction=lambda queue, fn, *args: fn(*args)),
+	}
+	exec(compile(ast.Module(body=[plugin_class], type_ignores=[]), "plugin_commands", "exec"), namespace)  # nosec B102  # executes AST parsed from this repo's plugin source, no external input
+	plugin = namespace["GlobalPlugin"]()
+	plugin._describing = True
+	plugin._run_describe(b"png", "token")
+	expected = (
+		"Masyadong maraming bagong LIMA AI account ang ginawa sa computer na ito kamakailan. "
+		"Pakisubukang muli pagkalipas ng mga 2 oras, o makipag-ugnayan sa Roscommon Systems sa hello@roscommonsystems.com."
+	)
+	assert speech_calls == [([("language", "fil"), expected], "normal")]
+	assert braille_calls == [expected]
+	assert not plugin._describing
+
+def _signup_plugin(error):
+	"""The real plugin methods for describing the screen and checking usage, with NVDA faked.
+	Returns (plugin, spoken lines, sign-outs) after both meet the backend refusing `error`."""
+	import usage
+	import vision
+
+	source = Path(announcements.__file__).with_name("__init__.py").read_text(encoding="utf-8")
+	plugin_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin")
+	names = {"_status_text", "_speak_localized", "_error_message", "_vision_error_message",
+			 "_sign_out_if_needed", "_run_describe", "_run_credit_usage", "_announce_translated"}
+	methods = [node for node in plugin_class.body if isinstance(node, ast.FunctionDef) and node.name in names]
+	for method in methods:
+		method.decorator_list = []
+	plugin_class.bases = []
+	plugin_class.body = methods
+	spoken, sign_outs = [], []
+
+	def refuse(*args, **kwargs):
+		raise vision.VisionError(error, retry_after=600, reason="ip")
+
+	namespace = {
+		"announcements": announcements,
+		"usage": SimpleNamespace(
+			fetch_credit_usage=lambda token: {"valid": False, "error": error, "reason": "ip", "retry_after": 600},
+			usage_text=lambda *a: "usage line", today_utc=lambda: None, limit_message=usage.limit_message,
+			reset_policy=usage.reset_policy, reset_date=usage.reset_date,
+		),
+		"vision": SimpleNamespace(VisionError=vision.VisionError, describe_image=refuse),
+		"settings": SimpleNamespace(get_language=lambda: "en", clear_session=lambda: sign_outs.append(1)),
+		"_SPEECH_LOCALES": {"tl": "fil", "vi": "vi"},
+		"_TRANSLATED_CODES": ("credit_exhausted", "signup_not_allowed", "signup_limited"),
+		"signup": signup,
+		"_": lambda text: text,
+		"Spri": SimpleNamespace(NORMAL="normal"),
+		"LangChangeCommand": lambda locale: ("language", locale),
+		"speech": SimpleNamespace(
+			speak=lambda sequence, priority: spoken.append(sequence[-1]),
+			speakMessage=lambda text, priority: spoken.append(text),
+		),
+		"braille": SimpleNamespace(handler=SimpleNamespace(message=lambda text: None)),
+		"queueHandler": SimpleNamespace(eventQueue=None, queueFunction=lambda queue, fn, *args: fn(*args)),
+		"log": SimpleNamespace(exception=lambda *a: None),
+		"ui": SimpleNamespace(message=spoken.append),
+	}
+	exec(compile(ast.Module(body=[plugin_class], type_ignores=[]), "plugin_commands", "exec"), namespace)  # nosec B102  # executes AST parsed from this repo's plugin source, no external input
+	plugin = namespace["GlobalPlugin"]()
+	plugin._describing = True
+	plugin._checking_usage = True
+	plugin._run_describe(b"png", "token")
+	plugin._run_credit_usage("token")
+	return plugin, spoken, sign_outs
+
+
+def test_a_refused_address_is_signed_out_like_lima_desktop():
+	"""Left signed in, every command would repeat the refusal; the message says it happened."""
+	_, spoken, sign_outs = _signup_plugin("signup_not_allowed")
+	assert sign_outs == [1, 1]  # once from the description, once from the usage check
+	assert len(spoken) == 2 and all("you have been signed out" in line for line in spoken)
+
+
+def test_a_signup_wait_keeps_the_user_signed_in():
+	"""The account is fine; it works once the wait is over."""
+	_, spoken, sign_outs = _signup_plugin("signup_limited")
+	assert sign_outs == []
+	assert all("about 10 minutes" in line for line in spoken)
+
+def test_a_rejected_sign_in_signs_out_and_says_how_to_sign_in_again():
+	"""A 401 used to be "The AI service returned an error." Now it says what to do."""
+	_, spoken, sign_outs = _signup_plugin("session_expired")
+	assert sign_outs == [1, 1]
+	assert len(spoken) == 2
+	assert all("no longer valid" in line and "NVDA+Alt+A" in line for line in spoken)
+
+
+def test_nvda_alt_a_opens_lima_ai_settings_and_nothing_else():
+	"""It opens NVDA's settings at LIMA AI's page, on the GUI thread, only when pressed."""
+	source = Path(announcements.__file__).with_name("__init__.py").read_text(encoding="utf-8")
+	plugin_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin")
+	method = next(node for node in plugin_class.body if isinstance(node, ast.FunctionDef) and node.name == "script_openAccountSettings")
+	gesture = next(k.value.value for d in method.decorator_list for k in d.keywords if k.arg == "gesture")
+	method.decorator_list = []
+	plugin_class.bases = []
+	plugin_class.body = [method]
+	calls = []
+	panel, dialog, popup = object(), object(), object()
+	namespace = {
+		"wx": SimpleNamespace(CallAfter=lambda fn, *args: calls.append((fn, args))),
+		"gui": SimpleNamespace(mainFrame=SimpleNamespace(popupSettingsDialog=popup), settingsDialogs=SimpleNamespace(NVDASettingsDialog=dialog)),
+		"settings": SimpleNamespace(LimaSettingsPanel=panel),
+	}
+	exec(compile(ast.Module(body=[plugin_class], type_ignores=[]), "plugin_commands", "exec"), namespace)  # nosec B102  # executes AST parsed from this repo's plugin source, no external input
+	namespace["GlobalPlugin"]().script_openAccountSettings(None)
+	assert gesture == "kb:NVDA+alt+a"
+	assert calls == [(popup, (dialog, panel))]
+
+
+@pytest.mark.parametrize("language", ["vi", "tl"])
+def test_every_sign_in_message_names_the_shortcut_in_every_language(language):
+	"""Messages that need a sign-in all end in NVDA+Alt+A, translated or not."""
+	import signup
+	text = lambda m: announcements.status_text(m, language, lambda x: x)
+	messages = [
+		signup.refusal_message("signup_not_allowed", None, None, text),
+		text("Your LIMA AI sign-in is no longer valid, so you have been signed out. Press NVDA+Alt+A to sign in again."),
+	]
+	if language == "vi":
+		messages.append(text("You are not signed in to LIMA AI. Press NVDA+Alt+A to sign in with Google."))
+	for message in messages:
+		assert "NVDA+Alt+A" in message
+		assert not message.startswith(("LIMA AI cannot", "Your LIMA AI", "You are not")), "untranslated"
+
