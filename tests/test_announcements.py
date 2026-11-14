@@ -156,7 +156,7 @@ def test_spent_credit_is_spoken_in_tagalog_with_the_reset_date():
 
 	source = Path(announcements.__file__).with_name("__init__.py").read_text(encoding="utf-8")
 	plugin_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin")
-	names = {"_status_text", "_speak_localized", "_error_message", "_vision_error_message", "_sign_out_if_needed", "_run_describe"}
+	names = {"_status_text", "_speak_localized", "_error_message", "_vision_error_message", "_sign_in_problem_message", "_run_describe"}
 	methods = [node for node in plugin_class.body if isinstance(node, ast.FunctionDef) and node.name in names]
 	for method in methods:
 		method.decorator_list = []
@@ -200,7 +200,7 @@ def test_a_signup_refusal_is_spoken_in_tagalog_with_the_wait():
 
 	source = Path(announcements.__file__).with_name("__init__.py").read_text(encoding="utf-8")
 	plugin_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin")
-	names = {"_status_text", "_speak_localized", "_error_message", "_vision_error_message", "_sign_out_if_needed", "_run_describe"}
+	names = {"_status_text", "_speak_localized", "_error_message", "_vision_error_message", "_sign_in_problem_message", "_run_describe"}
 	methods = [node for node in plugin_class.body if isinstance(node, ast.FunctionDef) and node.name in names]
 	for method in methods:
 		method.decorator_list = []
@@ -238,7 +238,7 @@ def test_a_signup_refusal_is_spoken_in_tagalog_with_the_wait():
 	assert braille_calls == [expected]
 	assert not plugin._describing
 
-def _signup_plugin(error):
+def _signup_plugin(error, uid="uid-a"):
 	"""The real plugin methods for describing the screen and checking usage, with NVDA faked.
 	Returns (plugin, spoken lines, sign-outs) after both meet the backend refusing `error`."""
 	import usage
@@ -247,7 +247,7 @@ def _signup_plugin(error):
 	source = Path(announcements.__file__).with_name("__init__.py").read_text(encoding="utf-8")
 	plugin_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin")
 	names = {"_status_text", "_speak_localized", "_error_message", "_vision_error_message",
-			 "_sign_out_if_needed", "_run_describe", "_run_credit_usage", "_announce_translated"}
+			 "_sign_in_problem_message", "_run_describe", "_run_credit_usage", "_announce_translated"}
 	methods = [node for node in plugin_class.body if isinstance(node, ast.FunctionDef) and node.name in names]
 	for method in methods:
 		method.decorator_list = []
@@ -256,17 +256,20 @@ def _signup_plugin(error):
 	spoken, sign_outs = [], []
 
 	def refuse(*args, **kwargs):
-		raise vision.VisionError(error, retry_after=600, reason="ip")
+		raise vision.VisionError(error, retry_after=600, reason="ip", uid=uid)
 
 	namespace = {
 		"announcements": announcements,
 		"usage": SimpleNamespace(
-			fetch_credit_usage=lambda token: {"valid": False, "error": error, "reason": "ip", "retry_after": 600},
+			fetch_credit_usage=lambda token: {"valid": False, "error": error, "reason": "ip", "retry_after": 600, "uid": uid},
 			usage_text=lambda *a: "usage line", today_utc=lambda: None, limit_message=usage.limit_message,
 			reset_policy=usage.reset_policy, reset_date=usage.reset_date,
 		),
 		"vision": SimpleNamespace(VisionError=vision.VisionError, describe_image=refuse),
-		"settings": SimpleNamespace(get_language=lambda: "en", clear_session=lambda: sign_outs.append(1)),
+		"settings": SimpleNamespace(
+			get_language=lambda: "en", is_current_account=lambda uid: uid != "someone-else",
+			clear_session_if_current=lambda uid: sign_outs.append(uid),
+		),
 		"_SPEECH_LOCALES": {"tl": "fil", "vi": "vi"},
 		"_TRANSLATED_CODES": ("credit_exhausted", "signup_not_allowed", "signup_limited"),
 		"signup": signup,
@@ -294,7 +297,7 @@ def _signup_plugin(error):
 def test_a_refused_address_is_signed_out_like_lima_desktop():
 	"""Left signed in, every command would repeat the refusal; the message says it happened."""
 	_, spoken, sign_outs = _signup_plugin("signup_not_allowed")
-	assert sign_outs == [1, 1]  # once from the description, once from the usage check
+	assert sign_outs == ["uid-a", "uid-a"]  # once from the description, once from the usage check
 	assert len(spoken) == 2 and all("you have been signed out" in line for line in spoken)
 
 
@@ -307,7 +310,7 @@ def test_a_signup_wait_keeps_the_user_signed_in():
 def test_a_rejected_sign_in_signs_out_and_says_how_to_sign_in_again():
 	"""A 401 used to be "The AI service returned an error." Now it says what to do."""
 	_, spoken, sign_outs = _signup_plugin("session_expired")
-	assert sign_outs == [1, 1]
+	assert sign_outs == ["uid-a", "uid-a"]
 	assert len(spoken) == 2
 	assert all("no longer valid" in line and "NVDA+Alt+A" in line for line in spoken)
 
@@ -349,3 +352,109 @@ def test_every_sign_in_message_names_the_shortcut_in_every_language(language):
 		assert "NVDA+Alt+A" in message
 		assert not message.startswith(("LIMA AI cannot", "Your LIMA AI", "You are not")), "untranslated"
 
+
+def test_a_late_failure_for_another_account_signs_nobody_out():
+	"""The user switched accounts while a request for the old one was out. The new account must
+	stay signed in, and they must not be told they have been signed out."""
+	_, spoken, sign_outs = _signup_plugin("signup_not_allowed", uid="someone-else")
+	assert sign_outs == []
+	assert spoken and all("signed out" not in line for line in spoken)
+
+
+def test_not_signed_in_is_spoken_in_tagalog_with_the_filipino_voice():
+	"""It used to be English, in the English voice, for Tagalog users."""
+	source = Path(announcements.__file__).with_name("__init__.py").read_text(encoding="utf-8")
+	assert 'self._announce_status(self._error_message("signed_out"))' not in source
+	plugin_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin")
+	names = {"_status_text", "_speak_localized", "_error_message", "_announce_translated", "_announce_status", "_report_narration_failure"}
+	plugin_class.body = [node for node in plugin_class.body if isinstance(node, ast.FunctionDef) and node.name in names]
+	for method in plugin_class.body:
+		method.decorator_list = []
+	plugin_class.bases = []
+	speech_calls = []
+	namespace = {
+		"announcements": announcements,
+		"settings": SimpleNamespace(get_language=lambda: "tl"),
+		"_SPEECH_LOCALES": {"tl": "fil", "vi": "vi"},
+		"_TRANSLATED_CODES": ("credit_exhausted", "signup_not_allowed", "signup_limited", "session_expired"),
+		"_": lambda text: text,
+		"Spri": SimpleNamespace(NORMAL="normal"),
+		"LangChangeCommand": lambda locale: ("language", locale),
+		"speech": SimpleNamespace(speak=lambda sequence, priority: speech_calls.append(sequence)),
+		"braille": SimpleNamespace(handler=SimpleNamespace(message=lambda text: None)),
+		"ui": SimpleNamespace(message=lambda text: speech_calls.append(["default voice", text])),
+	}
+	exec(compile(ast.Module(body=[plugin_class], type_ignores=[]), "plugin_commands", "exec"), namespace)  # nosec B102  # executes AST parsed from this repo's plugin source, no external input
+	namespace["GlobalPlugin"]()._report_narration_failure("signed_out", None, True)
+	assert speech_calls[0] == [
+		("language", "fil"),
+		"Hindi ka pa naka-sign in sa LIMA AI. Pindutin ang NVDA+Alt+A para mag-sign in gamit ang Google.",
+	]
+
+
+def _settings_panel(result, current_uid="uid-a"):
+	"""LimaSettingsPanel's credit-usage handling from settings.py, with wx and NVDA faked.
+	Returns what it did: (field text, message boxes, sign-outs, account UI refreshes)."""
+	import signup
+	import usage
+
+	source = Path(announcements.__file__).with_name("settings.py").read_text(encoding="utf-8")
+	panel_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "LimaSettingsPanel")
+	names = {"_show_credit_usage", "_show_sign_in_problem"}
+	panel_class.body = [node for node in panel_class.body if isinstance(node, ast.FunctionDef) and node.name in names]
+	panel_class.bases = []
+	field, boxes, sign_outs, refreshes = [], [], [], []
+
+	def clear_session_if_current(uid):
+		if uid and uid != current_uid:
+			return False
+		sign_outs.append(uid)
+		return True
+
+	namespace = {
+		"signup": signup,
+		"usage": usage,
+		"get_language": lambda: "en",
+		"clear_session_if_current": clear_session_if_current,
+		"gui": SimpleNamespace(messageBox=lambda message, title, style: boxes.append(message)),
+		"wx": SimpleNamespace(OK=1, ICON_WARNING=2),
+		"ui": SimpleNamespace(message=lambda text: None),
+		"_": lambda text: text,
+	}
+	exec(compile(ast.Module(body=[panel_class], type_ignores=[]), "settings_panel", "exec"), namespace)  # nosec B102  # executes AST parsed from this repo's plugin source, no external input
+	panel = namespace["LimaSettingsPanel"]()
+	panel.creditUsage = SimpleNamespace(SetValue=field.append, HasFocus=lambda: False)
+	panel._usage_label = lambda message: message
+	panel._refresh_account_ui = lambda: refreshes.append(1)
+	panel._show_credit_usage(result)
+	return field, boxes, sign_outs, refreshes
+
+
+def test_settings_a_refused_first_sign_in_is_explained_and_signed_out():
+	"""Right after Sign in with Google, the panel's usage fetch is the account's first request.
+	It used to show Not available and leave the user signed in."""
+	field, boxes, sign_outs, refreshes = _settings_panel({"valid": False, "error": "signup_not_allowed", "uid": "uid-a"})
+	assert sign_outs == ["uid-a"] and refreshes == [1]
+	assert len(boxes) == 1 and "different Google account" in boxes[0]
+
+
+def test_settings_a_rejected_sign_in_is_explained_and_signed_out():
+	_, boxes, sign_outs, _ = _settings_panel({"valid": False, "error": "session_expired", "uid": "uid-a"})
+	assert sign_outs == ["uid-a"] and "no longer valid" in boxes[0]
+
+
+def test_settings_a_signup_wait_is_explained_and_keeps_the_user_signed_in():
+	field, boxes, sign_outs, _ = _settings_panel({"valid": False, "error": "signup_limited", "reason": "ip", "retry_after": 600})
+	assert sign_outs == [] and "about 10 minutes" in boxes[0]
+	assert field == ["Not available"]
+
+
+def test_settings_a_late_failure_for_another_account_is_left_alone():
+	field, boxes, sign_outs, _ = _settings_panel({"valid": False, "error": "signup_not_allowed", "uid": "uid-old"})
+	assert sign_outs == [] and boxes == []
+	assert field == ["Not available"]
+
+
+def test_settings_an_ordinary_failure_still_reads_not_available():
+	field, boxes, sign_outs, _ = _settings_panel({"valid": False, "error": "unavailable"})
+	assert (field, boxes, sign_outs) == (["Not available"], [], [])

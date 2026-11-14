@@ -11,7 +11,9 @@
 # This module says so in words a screen-reader user can act on, and supplies the
 # anonymous device ID the per-computer check counts.
 
+import base64
 import hashlib
+import json
 import logging
 import math
 import os
@@ -20,6 +22,44 @@ log = logging.getLogger(__name__)
 
 SIGNUP_NOT_ALLOWED = "signup_not_allowed"
 SIGNUP_LIMITED = "signup_limited"
+# The backend no longer accepts this sign-in. Not from the signup guard, but handled with it:
+# it is the other failure that signs the user out.
+SESSION_EXPIRED = "session_expired"
+
+#: Failures that sign the user out: this account will never work as it is.
+SIGN_OUT_CODES = (SIGNUP_NOT_ALLOWED, SESSION_EXPIRED)
+
+# The backend's OWN answers when it rejects the sign-in itself (lima-addon-auth-server's
+# authenticate_request). Matched exactly, because the proxy passes OpenRouter's status and
+# body straight through: an OpenRouter 401 (its key) or 403 (a flagged image) is the AI
+# service failing, not the user's sign-in, and must never sign anyone out.
+BACKEND_SIGN_IN_REJECTIONS = frozenset({
+	"Missing bearer token",
+	"Invalid or expired token",
+	"Email not verified",
+	"Sign-in provider not allowed",
+})
+
+
+def is_sign_in_rejection(status, message):
+	"""True when a 401/403 is the backend refusing the sign-in, not an upstream error."""
+	return status in (401, 403) and message in BACKEND_SIGN_IN_REJECTIONS
+
+
+def token_uid(id_token):
+	"""The Firebase uid inside an ID token, or "" if it cannot be read.
+
+	Not verified - the backend does that. It only names which account a request was made as,
+	so a failure that arrives late signs out that account and never the one the user has
+	switched to since.
+	"""
+	try:
+		payload = id_token.split(".")[1]
+		claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+		uid = claims.get("user_id") or claims.get("sub") or ""
+		return uid if isinstance(uid, str) else ""
+	except Exception:
+		return ""
 
 # Mixed into the device ID before hashing, so the value is this add-on's alone: it cannot be
 # matched against what any other program - or LIMA Desktop - derives from the same machine.
@@ -91,13 +131,19 @@ def wait_phrase(seconds, text):
 
 
 def refusal_message(code, reason, retry_after, text):
-	"""What the user hears when the backend refuses to create their free account.
+	"""What the user hears when the backend refuses their free account or their sign-in.
 
 	`text` translates each sentence (the add-on's _status_text). Returns None for any other
 	code, so callers fall through to their usual messages.
 	"""
+	if code == SESSION_EXPIRED:
+		# Signed out as this is spoken, like SIGNUP_NOT_ALLOWED.
+		return text(
+			"Your LIMA AI sign-in is no longer valid, so you have been signed out. "
+			"Press NVDA+Alt+A to sign in again."
+		)
 	if code == SIGNUP_NOT_ALLOWED:
-		# The plugin signs the account out as this is spoken (_sign_out_if_refused).
+		# The plugin and the settings panel sign the account out as this is spoken.
 		return text(
 			"LIMA AI cannot create a free account with this email address, so you have been "
 			"signed out. Press NVDA+Alt+A to sign in with a different Google account, or contact "

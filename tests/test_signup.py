@@ -4,8 +4,9 @@ usage recognise a refusal, and what a screen-reader user hears."""
 import io
 import json
 import re
+import sys
+import types
 import urllib.error
-import winreg
 from contextlib import contextmanager
 from unittest import mock
 
@@ -59,7 +60,9 @@ def _text(language):
 
 @pytest.fixture
 def registry(monkeypatch):
-	"""Stand in for HKLM\\SOFTWARE\\Microsoft\\Cryptography; set .guid to what it holds."""
+	"""A stand-in winreg module holding HKLM\\SOFTWARE\\Microsoft\\Cryptography; set .guid to
+	what it holds. A fake module rather than the real one patched, so these run on any OS:
+	signup.device_id() imports winreg when called, and Linux has none."""
 	state = mock.Mock(guid="AAAA1111-2222-3333-4444-555566667777", calls=[])
 	key = mock.MagicMock()
 	key.__enter__.return_value = key
@@ -73,8 +76,14 @@ def registry(monkeypatch):
 			raise state.guid
 		return state.guid, 1
 
-	monkeypatch.setattr(winreg, "OpenKey", open_key)
-	monkeypatch.setattr(winreg, "QueryValueEx", query)
+	fake = types.ModuleType("winreg")
+	fake.HKEY_LOCAL_MACHINE = 0x80000002
+	fake.KEY_READ = 0x20019
+	fake.KEY_WOW64_64KEY = 0x0100
+	fake.OpenKey = open_key
+	fake.QueryValueEx = query
+	monkeypatch.setitem(sys.modules, "winreg", fake)
+	state.module = fake
 	return state
 
 
@@ -98,16 +107,15 @@ def test_two_windows_accounts_on_one_cloned_pc_get_different_ids(registry, monke
 
 def test_device_id_differs_from_lima_desktops(registry, monkeypatch):
 	"""Salted per product, so the two products' IDs for one computer cannot be linked."""
+	ours = signup.device_id()
 	monkeypatch.setattr(signup, "_DEVICE_ID_SALT", "lima-desktop-device-v1")
-	desktop_style = signup.device_id()
-	monkeypatch.undo()
-	assert signup.device_id() != desktop_style
+	assert signup.device_id() != ours
 
 
 def test_device_id_reads_the_64_bit_registry_view(registry):
 	"""NVDA may be 32-bit, and would otherwise be redirected to WOW6432Node."""
 	signup.device_id()
-	assert registry.calls[0][3] & winreg.KEY_WOW64_64KEY
+	assert registry.calls[0][3] & registry.module.KEY_WOW64_64KEY
 
 
 @pytest.mark.parametrize("guid", [OSError("no key"), "", "  "])
@@ -224,7 +232,7 @@ def test_usage_sends_the_device_id_when_set(monkeypatch):
 
 def test_usage_403_signup_not_allowed():
 	error = _http_error(403, {"message": "signup_not_allowed"})
-	assert usage.fetch_credit_usage("tok", _opener=_opener(raise_exc=error)) == {"valid": False, "error": "signup_not_allowed"}
+	assert usage.fetch_credit_usage("tok", _opener=_opener(raise_exc=error)) == {"valid": False, "error": "signup_not_allowed", "uid": ""}
 
 
 def test_usage_429_signup_limited():
@@ -237,7 +245,7 @@ def test_usage_429_signup_limited():
 @pytest.mark.parametrize("status", [401, 403])
 def test_usage_a_rejected_sign_in_says_sign_in_again(status):
 	error = _http_error(status, {"message": "Invalid or expired token"})
-	assert usage.fetch_credit_usage("tok", _opener=_opener(raise_exc=error)) == {"valid": False, "error": "session_expired"}
+	assert usage.fetch_credit_usage("tok", _opener=_opener(raise_exc=error)) == {"valid": False, "error": "session_expired", "uid": ""}
 
 
 def test_usage_a_plain_429_is_still_rate_limited():
@@ -250,3 +258,69 @@ def test_usage_a_plain_429_is_still_rate_limited():
 @pytest.mark.parametrize("code", ["signup_not_allowed", "signup_limited", "session_expired"])
 def test_narration_stops_on_a_signup_refusal_rather_than_retrying_every_tick(code):
 	assert code in webnarration.WebNarrator.STOPPING_CODES
+
+
+# --- Review fixes: whose sign-in failed, and was it the sign-in at all ---------------------------
+
+def _token(uid):
+	"""A Firebase-shaped ID token for `uid` (unsigned; nothing here verifies it)."""
+	import base64
+
+	def part(obj):
+		return base64.urlsafe_b64encode(json.dumps(obj).encode()).decode().rstrip("=")
+	return "%s.%s.sig" % (part({"alg": "RS256"}), part({"user_id": uid, "sub": uid}))
+
+
+def test_token_uid_reads_the_account_from_a_token():
+	assert signup.token_uid(_token("uid-a")) == "uid-a"
+
+
+@pytest.mark.parametrize("token", ["", "not-a-jwt", "a.%%%.c", None, "a.e30.c"])
+def test_token_uid_is_empty_when_it_cannot_tell(token):
+	assert signup.token_uid(token) == ""
+
+
+@pytest.mark.parametrize("status,body", [
+	(401, {"error": {"code": 401, "message": "No auth credentials found"}}),
+	(403, {"error": {"code": 403, "message": "Input was flagged by moderation"}}),
+	(401, {"message": "something else"}),
+])
+def test_vision_an_openrouter_401_or_403_is_an_api_error_not_a_sign_out(status, body):
+	"""The proxy passes OpenRouter's status through. A flagged image or a bad upstream key must
+	never sign the user out of a Google account that is fine."""
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_image(b"png", _token("uid-a"), _opener=_opener(raise_exc=_http_error(status, body)))
+	assert exc.value.code == "api_error"
+
+
+def test_vision_a_rejection_names_the_account_it_was_for():
+	error = _http_error(401, {"message": "Invalid or expired token"})
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_image(b"png", _token("uid-a"), _opener=_opener(raise_exc=error))
+	assert (exc.value.code, exc.value.uid) == ("session_expired", "uid-a")
+
+
+def test_vision_a_refused_address_names_the_account_it_was_for():
+	error = _http_error(403, {"message": "signup_not_allowed"})
+	with pytest.raises(vision.VisionError) as exc:
+		vision.describe_image(b"png", _token("uid-a"), _opener=_opener(raise_exc=error))
+	assert (exc.value.code, exc.value.uid) == ("signup_not_allowed", "uid-a")
+
+
+def test_usage_an_openrouter_403_is_unavailable_not_a_sign_out():
+	error = _http_error(403, {"error": {"code": 403, "message": "Forbidden"}})
+	assert usage.fetch_credit_usage(_token("uid-a"), _opener=_opener(raise_exc=error)) == {"valid": False, "error": "unavailable"}
+
+
+def test_usage_a_rejection_names_the_account_it_was_for():
+	error = _http_error(403, {"message": "Email not verified"})
+	assert usage.fetch_credit_usage(_token("uid-a"), _opener=_opener(raise_exc=error)) == {
+		"valid": False, "error": "session_expired", "uid": "uid-a",
+	}
+
+
+def test_every_backend_sign_in_rejection_is_recognised():
+	"""Kept in step with lima-addon-auth-server's authenticate_request."""
+	for message in ("Missing bearer token", "Invalid or expired token", "Email not verified", "Sign-in provider not allowed"):
+		assert signup.is_sign_in_rejection(401, message) or signup.is_sign_in_rejection(403, message)
+	assert not signup.is_sign_in_rejection(500, "Invalid or expired token")

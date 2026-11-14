@@ -63,7 +63,7 @@ VIETNAMESE = {
 	"about {n} days": "khoảng {n} ngày",
 }
 
-# Tagalog command text. Only the credit-usage and sign-up lines so far: the add-on's other command
+# Tagalog command text. Only the credit-usage, sign-in and sign-up lines so far: the add-on's other command
 # messages are still spoken in English for Tagalog users (only AI replies are in Tagalog).
 TAGALOG = {
 	"Credit usage:": "Paggamit ng credits:",
@@ -87,6 +87,7 @@ TAGALOG = {
 	"{percent}% used": "{percent}% ang nagamit",
 	# Sign-up refusals from the backend's signup guard (signup.py), and their wait phrases.
 	"LIMA AI cannot create a free account with this email address, so you have been signed out. Press NVDA+Alt+A to sign in with a different Google account, or contact Roscommon Systems at hello@roscommonsystems.com.": "Hindi makagawa ang LIMA AI ng libreng account gamit ang email address na ito, kaya na-sign out ka na. Pindutin ang NVDA+Alt+A para mag-sign in gamit ang ibang Google account, o makipag-ugnayan sa Roscommon Systems sa hello@roscommonsystems.com.",
+	"You are not signed in to LIMA AI. Press NVDA+Alt+A to sign in with Google.": "Hindi ka pa naka-sign in sa LIMA AI. Pindutin ang NVDA+Alt+A para mag-sign in gamit ang Google.",
 	"Your LIMA AI sign-in is no longer valid, so you have been signed out. Press NVDA+Alt+A to sign in again.": "Hindi na valid ang iyong pag-sign in sa LIMA AI, kaya na-sign out ka na. Pindutin ang NVDA+Alt+A para mag-sign in muli.",
 	"LIMA AI can't create new free accounts right now. Please try again later.": "Hindi makagawa ang LIMA AI ng mga bagong libreng account sa ngayon. Pakisubukang muli mamaya.",
 	"Too many new LIMA AI accounts have been created on this computer recently. Please try again in {wait}, or contact Roscommon Systems at hello@roscommonsystems.com.": "Masyadong maraming bagong LIMA AI account ang ginawa sa computer na ito kamakailan. Pakisubukang muli pagkalipas ng {wait}, o makipag-ugnayan sa Roscommon Systems sa hello@roscommonsystems.com.",

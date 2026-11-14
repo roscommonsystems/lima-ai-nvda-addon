@@ -15,6 +15,7 @@ import addonHandler
 from . import announcements
 from . import auth
 from . import firebase_config
+from . import signup
 from . import usage
 
 addonHandler.initTranslation()
@@ -135,6 +136,33 @@ def clear_session():
 	c["userEmail"] = ""
 	c["userDisplayName"] = ""
 	_clear_token_cache()
+
+
+def get_user_uid():
+	return config.conf[CONFIG_SECTION]["userUid"]
+
+
+def is_current_account(uid):
+	"""Whether a failure for account `uid` still concerns whoever is signed in now.
+
+	False only when the user has since signed in as someone else. An unknown uid ("") or a
+	user already signed out count as current: the failure is theirs, and saying so is right.
+	"""
+	current = get_user_uid()
+	return not uid or not current or uid == current
+
+
+def clear_session_if_current(uid):
+	"""Sign out after a failure made as `uid` - unless the user has switched accounts since.
+
+	The failure can arrive seconds after its request (an AI call may take 25 s), and by then
+	the user may have signed in as someone else; that account must not be the one signed out.
+	Returns whether it signed out. Main thread only, like any NVDA config change.
+	"""
+	if not is_current_account(uid):
+		return False
+	clear_session()
+	return True
 
 
 class LimaSettingsPanel(SettingsPanel):
@@ -268,11 +296,37 @@ class LimaSettingsPanel(SettingsPanel):
 				return
 		except RuntimeError:
 			return
+		# Right after "Sign in with Google" this is the account's FIRST request, so it is where
+		# a new account meets the backend's signup guard. "Not available" would hide that; the
+		# user is told why, as NVDA+Alt+U and the AI commands do, and signed out when the account
+		# cannot be used.
+		if result and not result.get("valid") and self._show_sign_in_problem(result):
+			return
 		line = usage.usage_text(result, usage.today_utc(), self._usage_label, get_language(), field=True)
 		self.creditUsage.SetValue(line)
 		# If the user is already on the field, they heard "checking…"; read the real figure once.
 		if self.creditUsage.HasFocus():
 			ui.message(line)
+
+	def _show_sign_in_problem(self, result):
+		"""Explain a signup refusal or rejected sign-in from the usage fetch. Returns False for
+		anything else, which the field shows as usual ("Not available").
+
+		A message box, as a failed sign-in already gets: the user is in this panel, has usually
+		just signed in, and must hear why the account cannot be used.
+		"""
+		code = result.get("error")
+		message = signup.refusal_message(code, result.get("reason"), result.get("retry_after"), self._usage_label)
+		if message is None:
+			return False
+		if code in signup.SIGN_OUT_CODES:
+			if not clear_session_if_current(result.get("uid", "")):
+				return False  # about an account the user has already switched away from
+			self._refresh_account_ui()  # now "Not signed in", with "Sign in with Google"
+		else:
+			self.creditUsage.SetValue(usage.usage_text(result, usage.today_utc(), self._usage_label, get_language(), field=True))
+		gui.messageBox(message, _("LIMA AI"), wx.OK | wx.ICON_WARNING)
+		return True
 
 	def onSignInOut(self, evt):
 		if is_signed_in():

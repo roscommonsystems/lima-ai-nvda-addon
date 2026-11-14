@@ -12,7 +12,7 @@ import usage
 import vision
 
 # The methods every flow below relies on to word and speak its messages.
-_MESSAGE_METHODS = ("_status_text", "_error_message", "_vision_error_message", "_sign_out_if_needed", "_speak_localized", "_announce_status")
+_MESSAGE_METHODS = ("_status_text", "_error_message", "_vision_error_message", "_sign_in_problem_message", "_speak_localized", "_announce_translated", "_announce_status")
 
 
 def _load_plugin(namespace, *names):

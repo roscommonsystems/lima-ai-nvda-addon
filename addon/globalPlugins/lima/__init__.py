@@ -276,9 +276,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		messages = {
 			# Translators: spoken when the user is not signed in. NVDA+Alt+A opens LIMA AI settings.
 			"signed_out": self._status_text("You are not signed in to LIMA AI. Press NVDA+Alt+A to sign in with Google."),
-			# Translators: spoken when the backend no longer accepts the user's sign-in (expired,
-			# revoked, or the email is not verified); the add-on has signed them out.
-			"session_expired": self._status_text("Your LIMA AI sign-in is no longer valid, so you have been signed out. Press NVDA+Alt+A to sign in again."),
 			# Translators: spoken when a description is already in progress.
 			"busy": self._status_text("Still describing, please wait."),
 			# Translators: spoken when the screen could not be captured.
@@ -300,22 +297,28 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		}
 		return messages.get(code, messages["api_error"])
 
-	def _sign_out_if_needed(self, code):
-		"""Sign out a session that cannot be used, as LIMA Desktop does: a Google account the
-		backend will never give a free account, or a sign-in the backend no longer accepts.
+	def _sign_in_problem_message(self, code, reason, retry_after, uid):
+		"""The message for a signup refusal or rejected sign-in, signing out when the account
+		cannot be used, as LIMA Desktop does. None for any other code.
+
 		Left signed in, every command would repeat the same failure; signed out, NVDA+Alt+A
 		opens a settings page that offers "Sign in with Google" rather than "Sign out".
 
-		Queued because NVDA's config is changed on the main thread only, and this is reached
-		from the worker threads too."""
-		if code in (signup.SIGNUP_NOT_ALLOWED, "session_expired"):
-			queueHandler.queueFunction(queueHandler.eventQueue, settings.clear_session)
+		`uid` is the account the failed request was made as. If the user has signed in as
+		someone else since - an AI call can take 25 s - the failure is not theirs: nobody is
+		signed out and they hear the ordinary error, not "you have been signed out". The sign-out
+		is queued, because NVDA's config is changed on the main thread only, and re-checks the
+		account when it runs."""
+		if code in signup.SIGN_OUT_CODES:
+			if not settings.is_current_account(uid):
+				return self._error_message("api_error")
+			queueHandler.queueFunction(queueHandler.eventQueue, settings.clear_session_if_current, uid)
+		return signup.refusal_message(code, reason, retry_after, self._status_text)
 
 	def _vision_error_message(self, error):
 		"""The spoken message for a VisionError. A spent credit says when it comes back,
 		using the reset date the backend sent with its 402."""
-		self._sign_out_if_needed(error.code)
-		refusal = signup.refusal_message(error.code, error.reason, error.retry_after, self._status_text)
+		refusal = self._sign_in_problem_message(error.code, error.reason, error.retry_after, error.uid)
 		if refusal:
 			return refusal
 		if error.code == "credit_exhausted":
@@ -328,7 +331,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		return self._error_message(error.code)
 
 	def _announce_translated(self, text):
-		"""Announce a line that is translated into every LIMA language (the credit lines).
+		"""Announce a line that is translated into every LIMA language (the credit, sign-in and
+		sign-up lines).
 
 		Unlike _announce_status, Tagalog gets the Filipino voice too: these lines exist in
 		Tagalog, while the add-on's other command messages are still English for Tagalog users.
@@ -363,7 +367,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def script_describeScreen(self, gesture):
 		id_token = settings.get_id_token()
 		if not id_token:
-			self._announce_status(self._error_message("signed_out"))
+			self._announce_translated(self._error_message("signed_out"))
 			return
 		if self._describing or self._searching:
 			self._announce_status(self._error_message("busy"))
@@ -408,7 +412,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def script_describeElement(self, gesture):
 		id_token = settings.get_id_token()
 		if not id_token:
-			self._announce_status(self._error_message("signed_out"))
+			self._announce_translated(self._error_message("signed_out"))
 			return
 		if self._describing or self._searching:
 			self._announce_status(self._error_message("busy"))
@@ -496,7 +500,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		# left open stays usable.
 		id_token = settings.get_id_token()
 		if not id_token:
-			self._announce_status(self._error_message("signed_out"))
+			self._announce_translated(self._error_message("signed_out"))
 			return False
 		if self._describing or self._searching:
 			self._announce_status(self._error_message("busy"))
@@ -643,6 +647,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		every interval, and stops by itself when the credit is used up or the user signed out."""
 		if code in _TRANSLATED_CODES and error is not None:
 			self._announce_translated(self._vision_error_message(error))
+		elif code == "signed_out":
+			# Translated into Tagalog too, so it takes the Filipino voice like the lines above.
+			self._announce_translated(self._error_message(code))
 		else:
 			self._announce_status(self._error_message(code))
 		if stopped:
@@ -668,7 +675,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def script_toggleWebNarration(self, gesture):
 		# Stopping is always allowed; only starting requires being signed in.
 		if not self._web_narrator.is_active and not settings.get_id_token():
-			self._announce_status(self._error_message("signed_out"))
+			self._announce_translated(self._error_message("signed_out"))
 			return
 		active = self._web_narrator.toggle()
 		# Translators: spoken when web narration is turned on or off.
@@ -685,7 +692,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def script_announceCreditUsage(self, gesture):
 		id_token = settings.get_id_token()
 		if not id_token:
-			self._announce_status(self._error_message("signed_out"))
+			self._announce_translated(self._error_message("signed_out"))
 			return
 		if self._checking_usage:
 			return  # the answer to the previous press is on its way
@@ -707,12 +714,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if result and not result.get("valid"):
 			# A first-time user's /usage provisions their key, so it can meet the signup guard.
 			# "Not available" would hide why; say what happened and what to do.
-			self._sign_out_if_needed(result.get("error"))
-			line = signup.refusal_message(
-				result.get("error"), result.get("reason"), result.get("retry_after"), self._status_text
+			line = self._sign_in_problem_message(
+				result.get("error"), result.get("reason"), result.get("retry_after"), result.get("uid", "")
 			)
-			if line is None and result.get("error") == "session_expired":
-				line = self._error_message("session_expired")
 		if line is None:
 			line = usage.usage_text(result, usage.today_utc(), self._status_text, settings.get_language())
 		# NVDA speech must run on the main thread.
@@ -765,7 +769,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			return  # the prompt is already open; ignore the repeat press rather than stacking a dialog
 		id_token = settings.get_id_token()
 		if not id_token:
-			self._announce_status(self._error_message("signed_out"))
+			self._announce_translated(self._error_message("signed_out"))
 			return
 		if self._describing:
 			self._announce_status(self._error_message("busy"))

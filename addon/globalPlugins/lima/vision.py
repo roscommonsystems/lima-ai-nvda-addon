@@ -12,6 +12,11 @@ import re
 import urllib.error
 import urllib.request
 
+try:
+	from . import signup
+except ImportError:  # loaded as a top-level module, as the tests do
+	import signup
+
 log = logging.getLogger(__name__)
 
 # Endpoint the chat body is POSTed to. Deliberately unset here: the NVDA plugin assigns
@@ -137,8 +142,12 @@ class VisionError(Exception):
 	code is one of: "api_error", "network", "empty", "credit_exhausted", "rate_limited",
 	"service_slow", "signup_not_allowed", "signup_limited", "session_expired".
 
-	"session_expired" is the backend's 401, or a 403 other than signup_not_allowed: it no
-	longer accepts this sign-in, and signing in again is what fixes it.
+	"session_expired" is the backend's own 401/403 rejecting the sign-in (signup.py's
+	BACKEND_SIGN_IN_REJECTIONS), and signing in again is what fixes it. An OpenRouter 401/403
+	passed through the proxy is "api_error".
+
+	"signup_not_allowed" and "session_expired" carry `uid`, the account the request was made as,
+	so the sign-out they cause can be skipped if the user has switched accounts since.
 
 	"signup_not_allowed" (the backend's 403) and "signup_limited" (its 429 with that message)
 	come from the backend's signup guard, on a free user's first request: see signup.py.
@@ -156,13 +165,14 @@ class VisionError(Exception):
 	asked us to wait, or None when it did not say.
 	"""
 
-	def __init__(self, code, resets=None, resets_at=None, retry_after=None, reason=None):
+	def __init__(self, code, resets=None, resets_at=None, retry_after=None, reason=None, uid=""):
 		super().__init__(code)
 		self.code = code
 		self.resets = resets
 		self.resets_at = resets_at
 		self.retry_after = retry_after
 		self.reason = reason
+		self.uid = uid
 
 
 def body_field(raw_body, name):
@@ -286,13 +296,14 @@ def _post_and_parse(payload, id_token, timeout, _opener):
 			# The backend will not give this Google account a free account (a disposable
 			# address). Another account will work, so this says that rather than "error".
 			log.info("LIMA AI sign-up refused for this account: %s", body[:300])
-			raise VisionError("signup_not_allowed") from e
-		if getattr(e, "code", None) in (401, 403):
-			# The backend no longer accepts this sign-in: expired or revoked (401), or the account
-			# is refused outright (403: email not verified, a non-Google sign-in). Signing in again
-			# is the fix, so it says that rather than "The AI service returned an error."
+			raise VisionError("signup_not_allowed", uid=signup.token_uid(id_token)) from e
+		if signup.is_sign_in_rejection(getattr(e, "code", None), body_field(body, "message")):
+			# The backend itself no longer accepts this sign-in: expired or revoked (401), or
+			# refused outright (403: email not verified, a non-Google sign-in). Signing in again
+			# is the fix. Only the backend's own answers count: OpenRouter's 401/403 come through
+			# the proxy unchanged and fall to api_error below, leaving the user signed in.
 			log.warning("LIMA AI sign-in rejected (HTTP %s): %s", e.code, body[:300])
-			raise VisionError("session_expired") from e
+			raise VisionError("session_expired", uid=signup.token_uid(id_token)) from e
 		if getattr(e, "code", None) == 429 and body_field(body, "message") == "signup_limited":
 			# Too many new accounts from this computer, network, or everyone today. The wait
 			# can be hours, so it is named rather than folded into "wait a moment".

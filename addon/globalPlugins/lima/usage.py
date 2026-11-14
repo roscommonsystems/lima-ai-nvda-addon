@@ -15,6 +15,11 @@ import logging
 import urllib.error
 import urllib.request
 
+try:
+	from . import signup
+except ImportError:  # loaded as a top-level module, as the tests do
+	import signup
+
 log = logging.getLogger(__name__)
 
 # Endpoint the request is POSTed to. Unset here for the same reason as vision.ENDPOINT_URL:
@@ -50,16 +55,20 @@ _MONTHS = {
 }
 
 
-def _signup_refusal(status, headers, raw_body):
-	"""The failure dict for a signup-guard refusal (see signup.py), or None for anything else."""
+def _signup_refusal(status, headers, raw_body, id_token):
+	"""The failure dict for a signup-guard refusal or a rejected sign-in (see signup.py), or
+	None for anything else. The two that sign the user out carry "uid", the account the request
+	was made as, so a late answer cannot sign out an account the user has switched to."""
 	try:
 		body = json.loads(raw_body) if raw_body else {}
 	except ValueError:
 		return None
 	if not isinstance(body, dict):
 		return None
-	if status == 403 and body.get("message") == "signup_not_allowed":
-		return {"valid": False, "error": "signup_not_allowed"}
+	if status == 403 and body.get("message") == signup.SIGNUP_NOT_ALLOWED:
+		return {"valid": False, "error": signup.SIGNUP_NOT_ALLOWED, "uid": signup.token_uid(id_token)}
+	if signup.is_sign_in_rejection(status, body.get("message")):
+		return {"valid": False, "error": signup.SESSION_EXPIRED, "uid": signup.token_uid(id_token)}
 	if status == 429 and body.get("message") == "signup_limited":
 		retry_after = None
 		for value in ((headers or {}).get("Retry-After"), body.get("retry_after")):
@@ -84,10 +93,10 @@ def fetch_credit_usage(id_token, timeout=15, _opener=None):
 		{"valid": True, "usage_percent": float|int|None, "plan_tier": str,
 		 "resets": "monthly"|"never"|None, "resets_at": datetime.date|None}
 	and {"valid": False, "error": code} on any failure, where code is "signed_out",
-	"network", "rate_limited" (the backend's 429), "session_expired" (its 401 or 403: sign in
-	again) or "unavailable" - or, from the backend's
-	signup guard on a first-time user, "signup_not_allowed" or "signup_limited" (which also
-	carries "reason" and "retry_after"; see signup.py).
+	"network", "rate_limited" (the backend's 429), "session_expired" (the backend's own 401 or
+	403 rejecting the sign-in) or "unavailable" - or, from the backend's signup guard on a
+	first-time user, "signup_not_allowed" or "signup_limited" (which also carries "reason" and
+	"retry_after"; see signup.py). "signup_not_allowed" and "session_expired" carry "uid".
 
 	`usage_percent` is None for an uncapped key. Callers show that the same way as a
 	failure: as "Not available", never as 0%.
@@ -121,12 +130,9 @@ def fetch_credit_usage(id_token, timeout=15, _opener=None):
 		except Exception:
 			pass
 		log.debug("LIMA credit usage unavailable (HTTP %s): %s", getattr(e, "code", "?"), detail)
-		refusal = _signup_refusal(getattr(e, "code", None), getattr(e, "headers", None), detail)
+		refusal = _signup_refusal(getattr(e, "code", None), getattr(e, "headers", None), detail, id_token)
 		if refusal:
 			return refusal
-		if getattr(e, "code", None) in (401, 403):
-			# The backend no longer accepts this sign-in, as in vision.py.
-			return {"valid": False, "error": "session_expired"}
 		if getattr(e, "code", None) == 429:
 			# Still shown as "Not available"; the separate code is for the log and for callers.
 			return {"valid": False, "error": "rate_limited"}
