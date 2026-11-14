@@ -81,7 +81,7 @@ def test_describe_image_network_failure_raises_network_code():
 
 def test_describe_image_http_error_raises_api_error():
 	import urllib.error
-	http_error = urllib.error.HTTPError("https://openrouter.ai", 401, "Unauthorized", {}, None)
+	http_error = urllib.error.HTTPError("https://openrouter.ai", 400, "Bad Request", {}, None)
 	opener = _fake_opener(raise_exc=http_error)
 	with pytest.raises(vision.VisionError) as exc:
 		vision.describe_image(b"img", "key", "m", _opener=opener)
@@ -175,7 +175,8 @@ def test_every_ai_command_reports_a_504_as_service_slow(request_ai):
 	assert exc.value.code == "service_slow"
 
 
-@pytest.mark.parametrize("status", [400, 401, 500])
+# 401 and 403 are not here: they mean "sign in again" (session_expired, see test_signup.py).
+@pytest.mark.parametrize("status", [400, 404, 500])
 def test_other_http_errors_stay_api_error(status):
 	with pytest.raises(vision.VisionError) as exc:
 		vision.describe_image(b"img", "key", "m", _opener=_fake_opener(raise_exc=_http_error(status)))

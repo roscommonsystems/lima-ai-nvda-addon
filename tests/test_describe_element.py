@@ -6,12 +6,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import announcements
+import signup
 import pytest
 import usage
 import vision
 
 # The methods every flow below relies on to word and speak its messages.
-_MESSAGE_METHODS = ("_status_text", "_error_message", "_vision_error_message", "_speak_localized", "_announce_status")
+_MESSAGE_METHODS = ("_status_text", "_error_message", "_vision_error_message", "_sign_in_problem_message", "_speak_localized", "_announce_translated", "_announce_status")
 
 
 def _load_plugin(namespace, *names):
@@ -46,6 +47,8 @@ def _nvda(reply=None, error=None):
 		"vision": SimpleNamespace(VisionError=vision.VisionError, describe_element=ask_vision, answer_element_question=ask_vision),
 		"settings": SimpleNamespace(get_language=lambda: "en", get_id_token=lambda: "token"),
 		"_SPEECH_LOCALES": {"tl": "fil", "vi": "vi"},
+		"_TRANSLATED_CODES": ("credit_exhausted", "signup_not_allowed", "signup_limited"),
+		"signup": signup,
 		"_": lambda text: text,
 		"Spri": SimpleNamespace(NORMAL="normal"),
 		"ui": SimpleNamespace(message=calls.spoken.append),
@@ -198,7 +201,7 @@ def test_a_followup_after_signing_out_asks_to_sign_in():
 	plugin = _load_plugin(namespace, "_ask_followup")
 	plugin._describing = False
 	assert plugin._ask_followup(_window(), "what colour is it?") is False
-	assert calls.spoken == ["Sign in with Google in LIMA AI settings to use this feature."]
+	assert calls.spoken == ["You are not signed in to LIMA AI. Press NVDA+Alt+A to sign in with Google."]
 	assert calls.asked == []
 
 

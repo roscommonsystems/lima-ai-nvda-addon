@@ -15,12 +15,22 @@ import logging
 import urllib.error
 import urllib.request
 
+try:
+	from . import signup
+except ImportError:  # loaded as a top-level module, as the tests do
+	import signup
+
 log = logging.getLogger(__name__)
 
 # Endpoint the request is POSTed to. Unset here for the same reason as vision.ENDPOINT_URL:
 # the plugin assigns it at init from firebase_config.LIMA_BACKEND_URL, which binds the
 # add-on to the dev or prod backend chosen at build time.
 ENDPOINT_URL = None
+
+# This computer's pseudonymous ID, sent as X-LIMA-Device; assigned at init as in vision.py.
+# /usage provisions a first-time user's key just as the AI proxy does, so it reaches the
+# backend's signup guard too and needs the same header.
+DEVICE_ID = ""
 
 #: Reset policies this build knows how to word. Anything else is treated as unknown, so a
 #: policy added to the server later costs the reset clause and nothing else.
@@ -45,6 +55,37 @@ _MONTHS = {
 }
 
 
+def _signup_refusal(status, headers, raw_body, id_token):
+	"""The failure dict for a signup-guard refusal or a rejected sign-in (see signup.py), or
+	None for anything else. The two that sign the user out carry "uid", the account the request
+	was made as, so a late answer cannot sign out an account the user has switched to."""
+	try:
+		body = json.loads(raw_body) if raw_body else {}
+	except ValueError:
+		return None
+	if not isinstance(body, dict):
+		return None
+	if status == 403 and body.get("message") == signup.SIGNUP_NOT_ALLOWED:
+		return {"valid": False, "error": signup.SIGNUP_NOT_ALLOWED, "uid": signup.token_uid(id_token)}
+	if signup.is_sign_in_rejection(status, body.get("message")):
+		return {"valid": False, "error": signup.SESSION_EXPIRED, "uid": signup.token_uid(id_token)}
+	if status == 429 and body.get("message") == "signup_limited":
+		retry_after = None
+		for value in ((headers or {}).get("Retry-After"), body.get("retry_after")):
+			if isinstance(value, bool):
+				continue
+			try:
+				retry_after = int(value)
+			except (TypeError, ValueError):
+				continue
+			if retry_after > 0:
+				break
+			retry_after = None
+		reason = body.get("reason") if isinstance(body.get("reason"), str) else ""
+		return {"valid": False, "error": "signup_limited", "reason": reason, "retry_after": retry_after}
+	return None
+
+
 def fetch_credit_usage(id_token, timeout=15, _opener=None):
 	"""Ask the backend what percentage of this user's included credit is spent.
 
@@ -52,7 +93,10 @@ def fetch_credit_usage(id_token, timeout=15, _opener=None):
 		{"valid": True, "usage_percent": float|int|None, "plan_tier": str,
 		 "resets": "monthly"|"never"|None, "resets_at": datetime.date|None}
 	and {"valid": False, "error": code} on any failure, where code is "signed_out",
-	"network", "rate_limited" (the backend's 429) or "unavailable".
+	"network", "rate_limited" (the backend's 429), "session_expired" (the backend's own 401 or
+	403 rejecting the sign-in) or "unavailable" - or, from the backend's signup guard on a
+	first-time user, "signup_not_allowed" or "signup_limited" (which also carries "reason" and
+	"retry_after"; see signup.py). "signup_not_allowed" and "session_expired" carry "uid".
 
 	`usage_percent` is None for an uncapped key. Callers show that the same way as a
 	failure: as "Not available", never as 0%.
@@ -66,12 +110,10 @@ def fetch_credit_usage(id_token, timeout=15, _opener=None):
 		log.error("usage.ENDPOINT_URL is unset; the LIMA backend URL was never configured")
 		return {"valid": False, "error": "unavailable"}
 
-	request = urllib.request.Request(
-		ENDPOINT_URL,
-		data=b"{}",
-		headers={"Authorization": "Bearer " + id_token, "Content-Type": "application/json"},
-		method="POST",
-	)
+	headers = {"Authorization": "Bearer " + id_token, "Content-Type": "application/json"}
+	if DEVICE_ID:
+		headers["X-LIMA-Device"] = DEVICE_ID
+	request = urllib.request.Request(ENDPOINT_URL, data=b"{}", headers=headers, method="POST")
 	opener = _opener or urllib.request.urlopen
 	try:
 		with opener(request, timeout=timeout) as response:
@@ -88,6 +130,9 @@ def fetch_credit_usage(id_token, timeout=15, _opener=None):
 		except Exception:
 			pass
 		log.debug("LIMA credit usage unavailable (HTTP %s): %s", getattr(e, "code", "?"), detail)
+		refusal = _signup_refusal(getattr(e, "code", None), getattr(e, "headers", None), detail, id_token)
+		if refusal:
+			return refusal
 		if getattr(e, "code", None) == 429:
 			# Still shown as "Not available"; the separate code is for the log and for callers.
 			return {"valid": False, "error": "rate_limited"}
