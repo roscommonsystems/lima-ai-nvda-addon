@@ -121,7 +121,7 @@ def test_an_unreadable_guid_gives_no_id_rather_than_raising(registry, guid):
 @pytest.mark.parametrize("seconds,expected", [
 	(None, "a little while"), ("soon", "a little while"), (0, "a little while"),
 	(30, "about a minute"), (91, "about 2 minutes"), (3600, "about an hour"),
-	(5401, "about 2 hours"), (86000, "about 24 hours"), (2592000, "about 30 days"),
+	(3601, "about 2 hours"), (5400, "about 2 hours"), (5401, "about 2 hours"), (7201, "about 3 hours"), (86000, "about 24 hours"), (2592000, "about 30 days"),
 ])
 def test_wait_phrase_reads_as_words(seconds, expected):
 	assert signup.wait_phrase(seconds, _english) == expected

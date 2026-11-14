@@ -80,7 +80,10 @@ def wait_phrase(seconds, text):
 		return text("about a minute")
 	if seconds < 3600:
 		return text("about {n} minutes").format(n=math.ceil(seconds / 60))
-	if seconds <= 5400:
+	# Whole hours, rounded UP like everything else here: 61 to 120 minutes is "about 2 hours".
+	# "About an hour" for anything up to 90 minutes sent people back up to half an hour early,
+	# to be refused again.
+	if seconds == 3600:
 		return text("about an hour")
 	if seconds < 2 * 86400:
 		return text("about {n} hours").format(n=math.ceil(seconds / 3600))
