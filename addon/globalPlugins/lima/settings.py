@@ -328,13 +328,10 @@ class LimaSettingsPanel(SettingsPanel):
 			if not clear_session_if_current(result.get("uid", "")):
 				return False  # about an account the user has already switched away from
 			self._refresh_account_ui()  # hides Credit usage; the button becomes "Sign in with Google"
-			self.accountStatus.SetLabel(message)
-			# Wrap rather than run off the side of the panel: the reason is a few sentences.
-			self.accountStatus.Wrap(self.FromDIP(420))
-			self.Layout()
+			self._show_account_message(message)
 		else:
 			self.creditUsage.SetValue(message)
-		ui.message(message)
+			ui.message(message)
 		return True
 
 	def onSignInOut(self, evt):
@@ -343,7 +340,7 @@ class LimaSettingsPanel(SettingsPanel):
 			self._refresh_account_ui()
 			return
 		if not firebase_config.is_configured():
-			gui.messageBox(self._SIGN_IN_ERRORS["config"], _("LIMA AI"), wx.OK | wx.ICON_ERROR)
+			self._show_account_message(self._SIGN_IN_ERRORS["config"])
 			return
 		self.signInButton.Disable()
 		# Translators: shown while the browser sign-in is in progress.
@@ -377,7 +374,22 @@ class LimaSettingsPanel(SettingsPanel):
 	def _sign_in_failed(self, code):
 		self.signInButton.Enable()
 		self._refresh_account_ui()
-		gui.messageBox(self._SIGN_IN_ERRORS.get(code, self._SIGN_IN_ERRORS["auth_error"]), _("LIMA AI"), wx.OK | wx.ICON_ERROR)
+		self._show_account_message(self._SIGN_IN_ERRORS.get(code, self._SIGN_IN_ERRORS["auth_error"]))
+
+	def _show_account_message(self, message):
+		"""Say why the user is not signed in, and leave it on the page - never a message box.
+
+		The account status line shows it in place of "Not signed in.", right above the "Sign in
+		with Google" button the user needs next, so they can read it again; it is spoken (and
+		brailled) as it happens, the way "Signed in as ..." is. A box would be one more thing to
+		find and dismiss before they could try again. The line goes back to "Not signed in." or
+		"Signed in as ..." the next time the account changes.
+		"""
+		self.accountStatus.SetLabel(message)
+		# Wrap rather than run off the side of the panel: some reasons are a few sentences.
+		self.accountStatus.Wrap(self.FromDIP(420))
+		self.Layout()
+		ui.message(message)
 
 	def onSave(self):
 		# Sign-in state is saved by the sign-in flow itself; persist the chosen options.

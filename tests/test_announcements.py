@@ -403,7 +403,7 @@ def _settings_panel(result, current_uid="uid-a"):
 
 	source = Path(announcements.__file__).with_name("settings.py").read_text(encoding="utf-8")
 	panel_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "LimaSettingsPanel")
-	names = {"_show_credit_usage", "_show_sign_in_problem"}
+	names = {"_show_credit_usage", "_show_sign_in_problem", "_show_account_message"}
 	panel_class.body = [node for node in panel_class.body if isinstance(node, ast.FunctionDef) and node.name in names]
 	panel_class.bases = []
 	did = SimpleNamespace(field=[], status=[], spoken=[], sign_outs=[], refreshes=[])
@@ -467,3 +467,57 @@ def test_settings_a_late_failure_for_another_account_is_left_alone():
 def test_settings_an_ordinary_failure_still_reads_not_available():
 	did = _settings_panel({"valid": False, "error": "unavailable"})
 	assert (did.field, did.spoken, did.sign_outs) == (["Not available"], [], [])
+
+
+def _sign_in_panel(configured=True):
+	"""LimaSettingsPanel's sign-in failure handling from settings.py, with wx and NVDA faked.
+	No `gui` in the namespace on purpose: a message box would raise NameError."""
+	source = Path(announcements.__file__).with_name("settings.py").read_text(encoding="utf-8")
+	panel_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "LimaSettingsPanel")
+	names = {"_sign_in_failed", "_show_account_message", "onSignInOut"}
+	keep = [node for node in panel_class.body if isinstance(node, ast.FunctionDef) and node.name in names]
+	errors = next(node for node in panel_class.body if isinstance(node, ast.Assign) and node.targets[0].id == "_SIGN_IN_ERRORS")
+	panel_class.body = [errors] + keep
+	panel_class.bases = []
+	did = SimpleNamespace(status=[], spoken=[], enabled=[], refreshes=[])
+	namespace = {
+		"ui": SimpleNamespace(message=did.spoken.append),
+		"_": lambda text: text,
+		"is_signed_in": lambda: False,
+		"firebase_config": SimpleNamespace(is_configured=lambda: configured),
+	}
+	exec(compile(ast.Module(body=[panel_class], type_ignores=[]), "settings_panel", "exec"), namespace)  # nosec B102  # executes AST parsed from this repo's plugin source, no external input
+	panel = namespace["LimaSettingsPanel"]()
+	panel.accountStatus = SimpleNamespace(SetLabel=did.status.append, Wrap=lambda width: None)
+	panel.signInButton = SimpleNamespace(Enable=lambda: did.enabled.append(1))
+	panel.FromDIP = lambda value: value
+	panel.Layout = lambda: None
+	panel._refresh_account_ui = lambda: did.refreshes.append(1)
+	return panel, did
+
+
+@pytest.mark.parametrize("code,expected", [
+	("cancelled", "Sign-in was cancelled."),
+	("timeout", "Sign-in timed out. Please try again."),
+	("network", "Could not reach the sign-in service. Check your connection and try again."),
+	("something new", "Sign-in failed. Please try again."),
+])
+def test_a_failed_sign_in_is_spoken_and_left_on_the_page_with_nothing_to_dismiss(code, expected):
+	"""It used to be a message box the user had to find and press OK on."""
+	panel, did = _sign_in_panel()
+	panel._sign_in_failed(code)
+	assert did.spoken == [expected]
+	assert did.status == [expected]  # where "Not signed in." was, above the button
+	assert did.enabled == [1]  # the button is ready for another try
+
+
+def test_sign_in_not_set_up_is_spoken_and_left_on_the_page():
+	panel, did = _sign_in_panel(configured=False)
+	panel.onSignInOut(None)
+	assert did.spoken == ["Google sign-in is not set up in this build of LIMA AI."]
+	assert did.status == did.spoken
+
+
+def test_the_settings_panel_has_no_message_boxes_left():
+	source = Path(announcements.__file__).with_name("settings.py").read_text(encoding="utf-8")
+	assert "messageBox" not in source
