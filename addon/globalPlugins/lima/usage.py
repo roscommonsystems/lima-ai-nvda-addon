@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 # add-on to the dev or prod backend chosen at build time.
 ENDPOINT_URL = None
 
-# This computer's anonymous ID, sent as X-LIMA-Device; assigned at init as in vision.py.
+# This computer's pseudonymous ID, sent as X-LIMA-Device; assigned at init as in vision.py.
 # /usage provisions a first-time user's key just as the AI proxy does, so it reaches the
 # backend's signup guard too and needs the same header.
 DEVICE_ID = ""

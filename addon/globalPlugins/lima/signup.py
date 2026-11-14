@@ -9,7 +9,7 @@
 #        accounts from this computer ("device"), this internet connection ("ip"), or from
 #        everyone today ("global"). The account is fine and works after the wait.
 # This module says so in words a screen-reader user can act on, and supplies the
-# anonymous device ID the per-computer check counts.
+# pseudonymous device ID the per-computer check counts.
 
 import base64
 import hashlib
@@ -61,19 +61,21 @@ def token_uid(id_token):
 	except Exception:
 		return ""
 
-# Mixed into the device ID before hashing, so the value is this add-on's alone: it cannot be
-# matched against what any other program - or LIMA Desktop - derives from the same machine.
-# Changing it gives every computer a new ID, which resets the backend's per-computer counts.
+# Mixed into the device ID before hashing, so the add-on's value differs from LIMA Desktop's for
+# the same machine and no plain equality matches them. It is a public constant, not a secret:
+# anyone who knows a machine's MachineGuid and account can compute either value. Changing it
+# gives every computer a new ID, which resets the backend's per-computer counts.
 _DEVICE_ID_SALT = "lima-nvda-device-v1"
 
 
 def device_id():
-	"""An anonymous identifier for this computer and Windows user, or "" if unavailable.
+	"""A pseudonymous identifier for this computer and Windows user, or "" if unavailable.
 
 	Sent as X-LIMA-Device so the backend can limit how many new free accounts are created on
 	one computer. It is a SHA-256 of Windows' MachineGuid and the signed-in Windows account,
-	salted for this add-on: one-way, so the backend never learns the MachineGuid or the
-	account name, and specific to LIMA AI, so it links to nothing else.
+	salted for this add-on: a pseudonymous, product-specific identifier. The MachineGuid and
+	account name are never sent, only the hash. It is not anonymous: it travels with the user's
+	sign-in token, and anyone who already knows both inputs can recompute it.
 
 	The Windows account is part of it because of school computer labs, which are often cloned
 	from one disk image and can share a MachineGuid. With the account in, students who each

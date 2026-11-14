@@ -204,7 +204,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		# Credit usage comes from the same backend, which holds the key and reads it from
 		# OpenRouter; only the percentage comes back.
 		usage.ENDPOINT_URL = firebase_config.LIMA_BACKEND_URL + "/usage"
-		# An anonymous per-computer ID (a one-way hash; see signup.device_id) that lets the
+		# A pseudonymous per-computer ID (a one-way hash; see signup.device_id) that lets the
 		# backend limit new free accounts per computer. Read once: it does not change while
 		# NVDA runs, and "" just leaves the header off.
 		vision.DEVICE_ID = usage.DEVICE_ID = signup.device_id()

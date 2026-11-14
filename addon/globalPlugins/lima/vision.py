@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 # used to live here, a second copy of the URL that silently went stale.
 ENDPOINT_URL = None
 
-# This computer's anonymous ID (signup.device_id()), sent as X-LIMA-Device so the backend can
+# This computer's pseudonymous ID (signup.device_id()), sent as X-LIMA-Device so the backend can
 # limit new free accounts per computer. Assigned by the plugin at init, like ENDPOINT_URL;
 # empty means the header is left off, which the backend accepts.
 DEVICE_ID = ""
