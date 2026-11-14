@@ -312,8 +312,13 @@ class LimaSettingsPanel(SettingsPanel):
 		"""Explain a signup refusal or rejected sign-in from the usage fetch. Returns False for
 		anything else, which the field shows as usual ("Not available").
 
-		A message box, as a failed sign-in already gets: the user is in this panel, has usually
-		just signed in, and must hear why the account cannot be used.
+		Spoken, and left on the page - never a message box. The user has usually just signed in
+		and must hear why the account cannot be used, but a box would be one more thing to find
+		and dismiss before they can act on it. This is how a successful sign-in is announced too.
+		  - Signed out: the reason replaces "Not signed in." in the account section, above the
+		    "Sign in with Google" button they need next.
+		  - Asked to wait: the reason goes in the Credit usage field, which they can Tab to and
+		    read again; the account stays signed in.
 		"""
 		code = result.get("error")
 		message = signup.refusal_message(code, result.get("reason"), result.get("retry_after"), self._usage_label)
@@ -322,10 +327,14 @@ class LimaSettingsPanel(SettingsPanel):
 		if code in signup.SIGN_OUT_CODES:
 			if not clear_session_if_current(result.get("uid", "")):
 				return False  # about an account the user has already switched away from
-			self._refresh_account_ui()  # now "Not signed in", with "Sign in with Google"
+			self._refresh_account_ui()  # hides Credit usage; the button becomes "Sign in with Google"
+			self.accountStatus.SetLabel(message)
+			# Wrap rather than run off the side of the panel: the reason is a few sentences.
+			self.accountStatus.Wrap(self.FromDIP(420))
+			self.Layout()
 		else:
-			self.creditUsage.SetValue(usage.usage_text(result, usage.today_utc(), self._usage_label, get_language(), field=True))
-		gui.messageBox(message, _("LIMA AI"), wx.OK | wx.ICON_WARNING)
+			self.creditUsage.SetValue(message)
+		ui.message(message)
 		return True
 
 	def onSignInOut(self, evt):

@@ -394,7 +394,10 @@ def test_not_signed_in_is_spoken_in_tagalog_with_the_filipino_voice():
 
 def _settings_panel(result, current_uid="uid-a"):
 	"""LimaSettingsPanel's credit-usage handling from settings.py, with wx and NVDA faked.
-	Returns what it did: (field text, message boxes, sign-outs, account UI refreshes)."""
+	Returns what it did: field text, account status text, spoken lines, sign-outs, refreshes.
+
+	There is no `gui` in the namespace on purpose: a message box would raise NameError. The
+	reason is spoken and left on the page, with nothing for the user to dismiss."""
 	import signup
 	import usage
 
@@ -403,12 +406,12 @@ def _settings_panel(result, current_uid="uid-a"):
 	names = {"_show_credit_usage", "_show_sign_in_problem"}
 	panel_class.body = [node for node in panel_class.body if isinstance(node, ast.FunctionDef) and node.name in names]
 	panel_class.bases = []
-	field, boxes, sign_outs, refreshes = [], [], [], []
+	did = SimpleNamespace(field=[], status=[], spoken=[], sign_outs=[], refreshes=[])
 
 	def clear_session_if_current(uid):
 		if uid and uid != current_uid:
 			return False
-		sign_outs.append(uid)
+		did.sign_outs.append(uid)
 		return True
 
 	namespace = {
@@ -416,45 +419,51 @@ def _settings_panel(result, current_uid="uid-a"):
 		"usage": usage,
 		"get_language": lambda: "en",
 		"clear_session_if_current": clear_session_if_current,
-		"gui": SimpleNamespace(messageBox=lambda message, title, style: boxes.append(message)),
-		"wx": SimpleNamespace(OK=1, ICON_WARNING=2),
-		"ui": SimpleNamespace(message=lambda text: None),
+		"ui": SimpleNamespace(message=did.spoken.append),
 		"_": lambda text: text,
 	}
 	exec(compile(ast.Module(body=[panel_class], type_ignores=[]), "settings_panel", "exec"), namespace)  # nosec B102  # executes AST parsed from this repo's plugin source, no external input
 	panel = namespace["LimaSettingsPanel"]()
-	panel.creditUsage = SimpleNamespace(SetValue=field.append, HasFocus=lambda: False)
+	panel.creditUsage = SimpleNamespace(SetValue=did.field.append, HasFocus=lambda: False)
+	panel.accountStatus = SimpleNamespace(SetLabel=did.status.append, Wrap=lambda width: None)
+	panel.FromDIP = lambda value: value
+	panel.Layout = lambda: None
 	panel._usage_label = lambda message: message
-	panel._refresh_account_ui = lambda: refreshes.append(1)
+	panel._refresh_account_ui = lambda: did.refreshes.append(1)
 	panel._show_credit_usage(result)
-	return field, boxes, sign_outs, refreshes
+	return did
 
 
-def test_settings_a_refused_first_sign_in_is_explained_and_signed_out():
+def test_settings_a_refused_first_sign_in_is_spoken_and_left_on_the_page():
 	"""Right after Sign in with Google, the panel's usage fetch is the account's first request.
-	It used to show Not available and leave the user signed in."""
-	field, boxes, sign_outs, refreshes = _settings_panel({"valid": False, "error": "signup_not_allowed", "uid": "uid-a"})
-	assert sign_outs == ["uid-a"] and refreshes == [1]
-	assert len(boxes) == 1 and "different Google account" in boxes[0]
+	It used to show Not available and leave the user signed in. Now the reason is spoken, stays
+	where "Not signed in." was, and there is no box to dismiss."""
+	did = _settings_panel({"valid": False, "error": "signup_not_allowed", "uid": "uid-a"})
+	assert did.sign_outs == ["uid-a"] and did.refreshes == [1]
+	assert len(did.spoken) == 1 and "different Google account" in did.spoken[0]
+	assert did.status == did.spoken
 
 
-def test_settings_a_rejected_sign_in_is_explained_and_signed_out():
-	_, boxes, sign_outs, _ = _settings_panel({"valid": False, "error": "session_expired", "uid": "uid-a"})
-	assert sign_outs == ["uid-a"] and "no longer valid" in boxes[0]
+def test_settings_a_rejected_sign_in_is_spoken_and_left_on_the_page():
+	did = _settings_panel({"valid": False, "error": "session_expired", "uid": "uid-a"})
+	assert did.sign_outs == ["uid-a"] and "no longer valid" in did.spoken[0]
+	assert did.status == did.spoken
 
 
-def test_settings_a_signup_wait_is_explained_and_keeps_the_user_signed_in():
-	field, boxes, sign_outs, _ = _settings_panel({"valid": False, "error": "signup_limited", "reason": "ip", "retry_after": 600})
-	assert sign_outs == [] and "about 10 minutes" in boxes[0]
-	assert field == ["Not available"]
+def test_settings_a_signup_wait_is_spoken_and_kept_in_the_credit_usage_field():
+	"""Signed in still; the field can be reached with Tab and read again."""
+	did = _settings_panel({"valid": False, "error": "signup_limited", "reason": "ip", "retry_after": 600})
+	assert did.sign_outs == [] and did.status == []
+	assert "about 10 minutes" in did.spoken[0]
+	assert did.field == did.spoken
 
 
 def test_settings_a_late_failure_for_another_account_is_left_alone():
-	field, boxes, sign_outs, _ = _settings_panel({"valid": False, "error": "signup_not_allowed", "uid": "uid-old"})
-	assert sign_outs == [] and boxes == []
-	assert field == ["Not available"]
+	did = _settings_panel({"valid": False, "error": "signup_not_allowed", "uid": "uid-old"})
+	assert did.sign_outs == [] and did.spoken == [] and did.status == []
+	assert did.field == ["Not available"]
 
 
 def test_settings_an_ordinary_failure_still_reads_not_available():
-	field, boxes, sign_outs, _ = _settings_panel({"valid": False, "error": "unavailable"})
-	assert (field, boxes, sign_outs) == (["Not available"], [], [])
+	did = _settings_panel({"valid": False, "error": "unavailable"})
+	assert (did.field, did.spoken, did.sign_outs) == (["Not available"], [], [])
