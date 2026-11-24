@@ -24,16 +24,17 @@ addon_info = AddonInfo(
 	addon_description=_(
 		"LIMA AI is the NVDA add-on companion to the LIMA (Low-Vision Intelligent "
 		"Machine Assistant) desktop app. Press a shortcut and NVDA speaks a brief AI "
-		"description of the active screen or of the control you are focused on, click "
+		"description of the active screen or of the control you are focused on, ask "
+		"follow-up questions about it, click "
 		"any on-screen control just by describing it, toggle live narration of "
 		"changes on a web page, and check how much of your monthly credit you have "
 		"used. Replies can be in English, Tagalog, or Vietnamese."
 	),
 	# version
-	addon_version="0.4.1",
+	addon_version="0.5.0",
 	# Brief changelog for this version
 	# Translators: what's new content for the add-on version to be shown in the add-on store
-	addon_changelog=_("New: press NVDA+Alt+U to hear how much of your monthly LIMA credit you have used and when it resets."),
+	addon_changelog=_("New: NVDA+Alt+E opens the description in its own window, where you can reread it, copy it and ask follow-up questions. New: NVDA+Alt+A opens LIMA AI settings to sign in or out. LIMA AI now says why a sign-in or a new account was refused, and when the server is busy or slow. Credit usage shows two decimal places."),
 	# Author(s)
 	addon_author="Roscommon Systems",
 	# URL for the add-on documentation support
@@ -45,7 +46,7 @@ addon_info = AddonInfo(
 	# Minimum NVDA version supported (e.g. "2019.3.0", minor version is optional)
 	addon_minimumNVDAVersion="2023.1.0",
 	# Last NVDA version supported/tested (e.g. "2024.4.0", ideally more recent than minimum version)
-	addon_lastTestedNVDAVersion="2026.1.1",
+	addon_lastTestedNVDAVersion="2026.3.1",
 	# Add-on update channel (default is None, denoting stable releases,
 	# and for development releases, use "dev".)
 	# Do not change unless you know what you are doing!
@@ -76,7 +77,8 @@ i18nSources: list[str] = pythonSources + ["buildVars.py"]
 # secret_config.py is intentionally NOT excluded: the release build bundles it so the
 # packaged add-on carries the (non-secret) Firebase sign-in config. It is kept out of git
 # via .gitignore, not out of the build.
-excludedFiles: list[str] = []
+# Compiled caches are left in addon/ by running the tests or loading the add-on from source.
+excludedFiles: list[str] = ["*.pyc"]
 
 # Base language for the NVDA add-on
 # If your add-on is written in a language other than english, modify this variable.
