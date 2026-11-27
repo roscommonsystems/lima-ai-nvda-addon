@@ -52,8 +52,10 @@ NVDA add-on (pure Python, stdlib only)
   3. Firestore REST write   ──►  users/{uid}: email, display_name, account_created_at, last_login_at
                                   (authorized with the Firebase idToken)
 
-No backend. Firestore security rules enforce that a user can only
-read/write their own users/{uid} document.
+The profile write goes straight to Firestore, with no server in between.
+Firestore security rules let a user read only their own users/{uid}
+document and write only its profile fields. The other fields on that
+document (plan, OpenRouter key) are written by lima-addon-auth-server.
 ```
 
 ---
@@ -100,20 +102,46 @@ FIREBASE_PROJECT_ID = ""    # Firebase → Project settings → Project ID
 1. **Build → Firestore Database → Create database**.
 2. Choose a **location** (permanent). Start in **Production mode**. **Create**.
 
-### Part 4 — Firestore security rule
-In **Firestore → Rules**, publish:
+### Part 4 — Firestore security rules
+The rules for LIMA's database (`lima-nvda-addon-firestore-db`) are kept, tested
+and deployed from the `firestore/` folder of `lima-addon-auth-server`, not
+written in the console. In outline, for `users/{uid}` and `users_dev/{uid}`:
+
 ```
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{uid} {
-      allow read, write: if request.auth.uid == uid;
+    function profileFields() {
+      return ['email', 'display_name', 'last_login_at', 'account_created_at',
+              'ip_address', 'system_language', 'user_agent', 'country',
+              // add-on 0.2.x
+              'displayName', 'lastLoginAt', 'createdAt',
+              'ipAddress', 'systemLanguage', 'userAgent'];
+    }
+    match /{collection}/{uid} {
+      allow get: if collection in ['users', 'users_dev'] && request.auth.uid == uid;
+      allow create: if collection in ['users', 'users_dev'] && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(profileFields());
+      allow update: if collection in ['users', 'users_dev'] && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(profileFields());
+      // no delete, no list
     }
   }
 }
 ```
-This is what makes direct client writes safe: each user can only touch their own
-`users/{uid}` document.
+
+A user can read their own document and write its **profile fields only**. They
+cannot change, add or remove the fields the server owns (`plan_tier`, the
+OpenRouter key fields, the cleanup fields), and cannot delete the document.
+
+**Do not use `allow read, write: if request.auth.uid == uid`.** That was the rule
+until 27 November 2026. It let any signed-in user edit the server's fields on
+their own document: for example, setting `plan_tier` made the server mint them a
+new free key on every request.
+
+**If the add-on starts writing a new field**, add it to `profileFields()` and
+deploy the rules *before* releasing that add-on version. Otherwise Firestore
+refuses the sign-in write with `403 PERMISSION_DENIED`.
 
 ### Part 5 — Google Cloud OAuth → `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
 Switch to https://console.cloud.google.com with the **same project** selected.
@@ -204,8 +232,12 @@ names, and is idempotent so it can be re-run as stragglers upgrade.
 
 ## 8. Security notes
 
-- **Direct client writes are safe** only because of the Firestore rule pinning
-  writes to `request.auth.uid == uid`. Do not loosen it.
+- **Direct client writes are safe** only because the Firestore rules limit each
+  user to the profile fields of their own `users/{uid}` document. Matching the uid
+  is not enough on its own: the same document holds fields the server trusts
+  (`plan_tier`, `openrouter_hash`, `key_delete_at`, `openrouter_hash_to_delete`),
+  so a rule that allows every field lets users change their own plan or have the
+  server delete OpenRouter keys. Do not loosen the field list.
 - **The desktop client secret is not confidential.** Google explicitly treats
   desktop OAuth client secrets as non-secret; PKCE is the real protection. It is
   therefore acceptable to ship it inside the add-on.
