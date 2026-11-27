@@ -96,212 +96,136 @@ def test_refresh_id_token_uses_refresh_grant():
 	assert "refresh_token=old-refresh" in form
 
 
-def test_get_user_document_returns_none_on_404():
-	http_error = urllib.error.HTTPError("https://firestore", 404, "Not Found", {}, None)
-	result = auth.get_user_document("proj", "uid", "tok", _opener=_fake_opener(raise_exc=http_error))
-	assert result is None
-
-
-def test_save_user_login_new_user_writes_flat_created_at():
-	captured = {}
-	auth.save_user_login(
-		"proj", "uid-9", "tok", "a@b.com", "Ada",
-		include_created=True, now="2026-07-13T00:00:00.000000Z",
-		_opener=_fake_opener(raw_bytes=b"{}", capture=captured),
-	)
-	request = captured["request"]
-	assert request.get_method() == "PATCH"
-	assert request.headers["Authorization"] == "Bearer tok"
-	assert "updateMask.fieldPaths=account_created_at" in request.full_url
-	body = json.loads(request.data.decode("utf-8"))
-	assert body["fields"]["email"]["stringValue"] == "a@b.com"
-	assert body["fields"]["account_created_at"]["timestampValue"] == "2026-07-13T00:00:00.000000Z"
-
-
-def test_save_user_login_uses_named_database_in_url():
-	captured = {}
-	auth.save_user_login(
-		"proj", "uid-9", "tok", "a@b.com", "Ada",
-		database_id="lima-nvda-addon-firestore-db",
-		_opener=_fake_opener(raw_bytes=b"{}", capture=captured),
-	)
-	assert "/databases/lima-nvda-addon-firestore-db/documents/users/uid-9" in captured["request"].full_url
-
-
-def test_save_user_login_writes_environment_fields_when_present():
-	captured = {}
-	auth.save_user_login(
-		"proj", "uid-9", "tok", "a@b.com", "Ada",
-		ip_address="203.0.113.5", system_language="en-US",
-		user_agent="Mozilla/5.0 (Windows NT 10.0)", country="SG",
-		_opener=_fake_opener(raw_bytes=b"{}", capture=captured),
-	)
-	request = captured["request"]
-	for path in ("ip_address", "system_language", "user_agent", "country"):
-		assert "updateMask.fieldPaths=" + path in request.full_url
-	body = json.loads(request.data.decode("utf-8"))
-	assert body["fields"]["ip_address"]["stringValue"] == "203.0.113.5"
-	assert body["fields"]["system_language"]["stringValue"] == "en-US"
-	assert body["fields"]["user_agent"]["stringValue"] == "Mozilla/5.0 (Windows NT 10.0)"
-	assert body["fields"]["country"]["stringValue"] == "SG"
-
-
-def test_save_user_login_omits_environment_fields_when_blank():
-	captured = {}
-	auth.save_user_login(
-		"proj", "uid-9", "tok", "a@b.com", "Ada",
-		_opener=_fake_opener(raw_bytes=b"{}", capture=captured),
-	)
-	request = captured["request"]
-	body = json.loads(request.data.decode("utf-8"))
-	for path in ("ip_address", "system_language", "user_agent", "country"):
-		assert path not in body["fields"]
-		assert "updateMask.fieldPaths=" + path not in request.full_url
-
-
-# The Firestore rules (lima-addon-auth-server/firestore/firestore.rules, profileFields())
-# refuse any field not on this list. Adding a field here without adding it to the rules,
-# and deploying them first, breaks sign-in for everyone on the new version.
-FIELDS_THE_RULES_ALLOW = {
-	"email", "display_name", "last_login_at", "account_created_at",
-	"ip_address", "system_language", "user_agent", "country",
-}
-
-
-def test_save_user_login_writes_only_fields_the_firestore_rules_allow():
-	captured = {}
-	auth.save_user_login(
-		"proj", "uid-9", "tok", "a@b.com", "Ada",
-		include_created=True,
-		ip_address="203.0.113.5", system_language="en-US",
-		user_agent="Mozilla/5.0 (Windows NT 10.0)", country="SG",
-		_opener=_fake_opener(raw_bytes=b"{}", capture=captured),
-	)
-	request = captured["request"]
-	body = json.loads(request.data.decode("utf-8"))
-	masked = {p.split("=", 1)[1] for p in request.full_url.split("?", 1)[1].split("&")}
-	assert set(body["fields"]) <= FIELDS_THE_RULES_ALLOW, \
-		"new Firestore field: add it to profileFields() in the rules and deploy them first"
-	assert masked == set(body["fields"])
-
-
-def test_save_user_login_returning_user_omits_created_at():
-	captured = {}
-	auth.save_user_login(
-		"proj", "uid-9", "tok", "a@b.com", "Ada",
-		include_created=False,
-		_opener=_fake_opener(raw_bytes=b"{}", capture=captured),
-	)
-	assert "account_created_at" not in captured["request"].full_url
-	body = json.loads(captured["request"].data.decode("utf-8"))
-	assert "account_created_at" not in body["fields"]
-	assert "last_login_at" in body["fields"]
-
-
-# --- The September 2026 snake_case rename -------------------------------------
+# --- The sign-in profile, recorded by the backend ----------------------------
 #
-# The profile field names moved to snake_case to match what the LIMA servers write
-# into these same documents. `createdAt` became `account_created_at`: it sat next
-# to lima-auth-server's `created_at`, which meant the KEY's age rather than the
-# account's, and the pair read as one duplicated field.
-#
-# The write-once guard is the part worth pinning. This is a desktop add-on, so
-# versions written before the rename stay in use for as long as users take to
-# upgrade, and they keep writing `createdAt`. A guard that read only the new name
-# would treat each of those users as brand new and stamp today's date over their
-# real signup date -- silently, and with no way to recover it.
+# Since 0.6.0 the add-on no longer writes to Firestore. It POSTs the sign-in to the LIMA
+# backend's /sign-in, which writes the profile with its own service account, as
+# lima-auth-server does for LIMA desktop: email and name from the verified token, IP from
+# its own front end, country from LemonSqueezy or else the Windows region sent here.
 
-def _store_user_with_existing(existing, capture):
-	"""Run _store_user against a document that already has these fields."""
-	config = auth.FirebaseConfig(
-		client_id="cid", client_secret="sec", api_key="key",
-		project_id="proj", database_id="db", users_collection="users_dev",
-	)
-	session = {
-		"uid": "uid-9", "idToken": "tok", "email": "a@b.com", "displayName": "Ada",
-	}
-
-	calls = []
-
-	@contextmanager
-	def opener(request, timeout=None):
-		calls.append(request)
-		capture["request"] = request  # the PATCH is the last call
-
-		class _Resp:
-			def read(self_inner):
-				# First call is the GET of the existing document.
-				return json.dumps(existing).encode("utf-8") if len(calls) == 1 else b"{}"
-
-		yield _Resp()
-
-	auth._store_user(config, session, _opener=opener)
+@pytest.fixture
+def backend(monkeypatch):
+	monkeypatch.setattr(auth, "SIGN_IN_URL", "https://backend.example/sign-in")
+	monkeypatch.setattr(auth, "ADDON_VERSION", "0.6.0")
+	monkeypatch.setattr(auth, "USER_AGENT", "LIMA-NVDA/0.6.0 NVDA/2026.3.1")
+	monkeypatch.setattr(auth, "DEVICE_ID", "d" * 64)
+	monkeypatch.setattr(auth, "_system_region", lambda: "VN")
 
 
-def test_a_legacy_created_at_is_not_overwritten():
+def test_record_sign_in_posts_the_token_and_headers_to_the_backend(backend):
 	captured = {}
-	_store_user_with_existing(
-		{"fields": {"createdAt": {"timestampValue": "2026-01-01T00:00:00Z"}}}, captured
-	)
-	body = json.loads(captured["request"].data.decode("utf-8"))
-	assert "account_created_at" not in body["fields"], \
-		"an add-on predating the rename wrote createdAt; today's date must not replace it"
-
-
-def test_a_migrated_account_created_at_is_not_overwritten():
-	captured = {}
-	_store_user_with_existing(
-		{"fields": {"account_created_at": {"timestampValue": "2026-01-01T00:00:00Z"}}}, captured
-	)
-	body = json.loads(captured["request"].data.decode("utf-8"))
-	assert "account_created_at" not in body["fields"]
-
-
-def test_a_genuinely_new_user_does_get_a_created_date():
-	captured = {}
-	_store_user_with_existing({"fields": {"email": {"stringValue": "a@b.com"}}}, captured)
-	body = json.loads(captured["request"].data.decode("utf-8"))
-	assert "account_created_at" in body["fields"], \
-		"a document with neither spelling is a first sign-in"
-
-
-def test_the_mask_and_the_body_always_agree():
-	"""An updateMask path naming no field in the body DELETES that field.
-
-	So the mask entries had to be renamed along with the fields; this is what
-	would catch a half-finished rename.
-	"""
-	captured = {}
-	auth.save_user_login(
-		"proj", "uid-9", "tok", "a@b.com", "Ada",
-		include_created=True, ip_address="203.0.113.5", system_language="en-US",
-		user_agent="Mozilla/5.0", country="SG",
-		_opener=_fake_opener(raw_bytes=b"{}", capture=captured),
-	)
+	assert auth.record_sign_in("tok", _opener=_fake_opener(raw_bytes=b'{"recorded": true}', capture=captured)) is True
 	request = captured["request"]
-	masked = {
-		p.split("=", 1)[1]
-		for p in request.full_url.split("?", 1)[1].split("&")
-		if p.startswith("updateMask.fieldPaths=")
-	}
-	written = set(json.loads(request.data.decode("utf-8"))["fields"])
-	assert masked == written
+	assert request.full_url == "https://backend.example/sign-in"
+	assert request.get_method() == "POST"
+	headers = {k.lower(): v for k, v in request.header_items()}
+	assert headers["authorization"] == "Bearer tok"
+	assert headers["user-agent"] == "LIMA-NVDA/0.6.0 NVDA/2026.3.1"
+	assert headers["x-lima-addon-version"] == "0.6.0"
+	assert headers["x-lima-region"] == "VN"
+	assert headers["x-lima-device"] == "d" * 64
 
 
-def test_no_camelcase_field_name_survives_anywhere():
-	"""One assertion over the whole write, so a missed field cannot slip through."""
+def test_record_sign_in_sends_no_profile_of_its_own(backend):
+	"""Nothing the server stores comes from the body: the token and our front end say who and where."""
 	captured = {}
-	auth.save_user_login(
-		"proj", "uid-9", "tok", "a@b.com", "Ada",
-		include_created=True, ip_address="203.0.113.5", system_language="en-US",
-		user_agent="Mozilla/5.0", country="SG",
-		_opener=_fake_opener(raw_bytes=b"{}", capture=captured),
-	)
-	request = captured["request"]
-	for retired in ("displayName", "lastLoginAt", "createdAt", "ipAddress",
-					"systemLanguage", "userAgent"):
-		assert retired not in request.data.decode("utf-8")
-		assert retired not in request.full_url
+	auth.record_sign_in("tok", _opener=_fake_opener(raw_bytes=b'{"recorded": true}', capture=captured))
+	assert captured["request"].data == b"{}"
+
+
+def test_record_sign_in_never_touches_firestore(backend):
+	captured = {}
+	auth.record_sign_in("tok", _opener=_fake_opener(raw_bytes=b'{"recorded": true}', capture=captured))
+	assert "firestore.googleapis.com" not in captured["request"].full_url
+	assert not hasattr(auth, "FIRESTORE_BASE")
+	assert not hasattr(auth, "save_user_login")
+
+
+def test_an_unknown_region_leaves_the_header_off(backend, monkeypatch):
+	monkeypatch.setattr(auth, "_system_region", lambda: "")
+	captured = {}
+	auth.record_sign_in("tok", _opener=_fake_opener(raw_bytes=b'{"recorded": true}', capture=captured))
+	assert "x-lima-region" not in {k.lower() for k, _ in captured["request"].header_items()}
+
+
+@pytest.mark.parametrize("raise_exc", [
+	urllib.error.HTTPError("https://backend", 500, "Internal", {}, None),
+	urllib.error.HTTPError("https://backend", 429, "Too Many", {}, None),
+	urllib.error.URLError("down"),
+	TimeoutError(),
+])
+def test_a_failure_is_false_and_never_raises(backend, raise_exc):
+	"""The user is signed in either way; the profile is only a record of it."""
+	assert auth.record_sign_in("tok", _opener=_fake_opener(raise_exc=raise_exc)) is False
+
+
+@pytest.mark.parametrize("raw", [b'{"recorded": false}', b"not json", b"[]"])
+def test_an_unrecorded_answer_is_false(backend, raw):
+	assert auth.record_sign_in("tok", _opener=_fake_opener(raw_bytes=raw)) is False
+
+
+def test_no_backend_url_is_false_without_a_request(monkeypatch):
+	monkeypatch.setattr(auth, "SIGN_IN_URL", None)
+	assert auth.record_sign_in("tok", _opener=_fake_opener(raise_exc=AssertionError("no request expected"))) is False
+
+
+def test_run_sign_in_records_through_the_backend(monkeypatch):
+	recorded = []
+	monkeypatch.setattr(auth, "_open_browser", lambda url: None)
+	monkeypatch.setattr(auth, "_wait_for_redirect", lambda server, timeout: ("code", STATE["value"], "Mozilla/5.0"))
+	monkeypatch.setattr(auth, "_url_token", lambda n: STATE["value"])
+	monkeypatch.setattr(auth, "exchange_code", lambda *a, **k: {"id_token": "goog-id"})
+	monkeypatch.setattr(auth, "sign_in_with_idp", lambda *a, **k: {
+		"localId": "uid-1", "email": "a@b.com", "displayName": "Ada", "idToken": "fb-tok",
+		"refreshToken": "ref", "expiresIn": "3600",
+	})
+	monkeypatch.setattr(auth, "record_sign_in", lambda token, _opener=None: recorded.append(token) or True)
+	session = auth.run_sign_in(auth.FirebaseConfig("cid", "sec", "key", "proj"), open_browser=False)
+	assert recorded == ["fb-tok"]
+	assert session["uid"] == "uid-1"
+
+
+def test_run_sign_in_succeeds_when_the_backend_cannot_record(monkeypatch):
+	monkeypatch.setattr(auth, "_open_browser", lambda url: None)
+	monkeypatch.setattr(auth, "_wait_for_redirect", lambda server, timeout: ("code", STATE["value"], ""))
+	monkeypatch.setattr(auth, "_url_token", lambda n: STATE["value"])
+	monkeypatch.setattr(auth, "exchange_code", lambda *a, **k: {"id_token": "goog-id"})
+	monkeypatch.setattr(auth, "sign_in_with_idp", lambda *a, **k: {"localId": "uid-1", "idToken": "fb-tok", "expiresIn": "3600"})
+	monkeypatch.setattr(auth, "record_sign_in", lambda token, _opener=None: False)
+	assert auth.run_sign_in(auth.FirebaseConfig("cid", "sec", "key", "proj"), open_browser=False)["uid"] == "uid-1"
+
+
+STATE = {"value": "fixed-state"}
+
+
+class _FakeKernel32:
+	def __init__(self, value):
+		self.value = value
+
+	def GetUserDefaultGeoName(self, buf, size):
+		buf.value = self.value
+		return len(self.value) + 1 if self.value else 0
+
+
+@pytest.mark.parametrize("windows_value,expected", [
+	("VN", "VN"), ("ie", "IE"), ("001", ""), ("419", ""), ("", ""), ("USA", ""),
+])
+def test_system_region_returns_only_a_country(monkeypatch, windows_value, expected):
+	"""Copied from LIMA desktop: UN M.49 codes like 001 (World) are not countries."""
+	import ctypes
+	monkeypatch.setattr(ctypes, "windll", type("W", (), {"kernel32": _FakeKernel32(windows_value)})(), raising=False)
+	assert auth._system_region() == expected
+
+
+def test_system_region_is_blank_when_windows_cannot_answer(monkeypatch):
+	import ctypes
+
+	class _Broken:
+		def GetUserDefaultGeoName(self, buf, size):
+			raise OSError("not available on this Windows")
+
+	monkeypatch.setattr(ctypes, "windll", type("W", (), {"kernel32": _Broken()})(), raising=False)
+	assert auth._system_region() == ""
 
 
 def test_parse_request_extracts_query_and_user_agent():
@@ -315,21 +239,6 @@ def test_parse_request_extracts_query_and_user_agent():
 	assert params["code"] == ["abc"]
 	assert params["state"] == ["xyz"]
 	assert user_agent == "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0"
-
-
-def test_fetch_ip_and_country_parses_cloudflare_trace():
-	trace = b"fl=123abc\nh=www.cloudflare.com\nip=203.0.113.9\nts=1752660000.1\nloc=SG\n"
-	assert auth._fetch_ip_and_country(_opener=_fake_opener(raw_bytes=trace)) == ("203.0.113.9", "SG")
-
-
-def test_fetch_ip_and_country_blank_when_lines_missing():
-	assert auth._fetch_ip_and_country(_opener=_fake_opener(raw_bytes=b"fl=1\nh=x\n")) == ("", "")
-
-
-def test_fetch_ip_and_country_blank_on_failure():
-	import urllib.error
-	opener = _fake_opener(raise_exc=urllib.error.URLError("no net"))
-	assert auth._fetch_ip_and_country(_opener=opener) == ("", "")
 
 
 def test_network_failure_raises_network_code():

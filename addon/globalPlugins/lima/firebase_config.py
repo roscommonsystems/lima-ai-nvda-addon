@@ -9,10 +9,9 @@
 #
 # Also required in the consoles (no code change needed):
 #   * Firebase -> Authentication -> Sign-in method -> enable Google.
-#   * Firestore rules that let each user write only the profile fields of their own
-#     doc. They live in lima-addon-auth-server/firestore/ (see docs/firebase-auth.md).
-#     A new field written by auth.save_user_login must be added there first, or
-#     sign-in gets 403 PERMISSION_DENIED.
+#
+# The add-on does not use Firestore. Since 0.6.0 the sign-in profile is recorded by the
+# LIMA backend (POST /sign-in), which writes it with its own service account.
 
 try:
 	from . import secret_config
@@ -25,11 +24,6 @@ except ImportError:
 	# returns False) rather than breaking the add-on load.
 	GOOGLE_CLIENT_ID = GOOGLE_CLIENT_SECRET = FIREBASE_API_KEY = FIREBASE_PROJECT_ID = ""
 
-# Firestore database id (not secret). Use "(default)" unless the project uses a
-# named database (Firebase console -> Firestore -> the database's id). This
-# product has its own dedicated database, so user docs are flat.
-FIREBASE_DATABASE_ID = "lima-nvda-addon-firestore-db"
-
 # ---------------------------------------------------------------------------
 # Environment (dev vs prod) — selected at BUILD time, never by editing this file
 # ---------------------------------------------------------------------------
@@ -41,24 +35,20 @@ FIREBASE_DATABASE_ID = "lima-nvda-addon-firestore-db"
 #
 # DO NOT hand-edit these to switch environments and then revert. That is what the
 # build flag is for; editing them makes branches diverge and risks shipping a build
-# pointed at the wrong backend (or, worse, writing test data into the prod `users`
-# collection).
+# pointed at the wrong backend (and, through it, writing test data into prod users).
 #
-# The two values in each entry MUST move together. FIRESTORE_USERS_COLLECTION has to
-# match the auth server's USERS_COLLECTION for that backend, because the add-on writes
-# the sign-in profile to Firestore directly while the server writes the OpenRouter
-# fields to the SAME document. Mismatch them and user records split in half.
+# Each backend keeps its own users in Firestore (users for prod, users_dev for dev). The
+# add-on no longer names the collection: since 0.6.0 the backend writes the sign-in
+# profile itself, into the same collection as the user's OpenRouter fields.
 #
 # Confirm a backend URL with:
 #   gcloud run services describe SERVICE --region us-west1 --format="value(status.url)"
 _ENVIRONMENTS = {
 	"prod": {
 		"backend_url": "https://lima-addon-auth-server-423416231887.us-west1.run.app",
-		"users_collection": "users",
 	},
 	"dev": {
 		"backend_url": "https://lima-addon-auth-server-dev-423416231887.us-west1.run.app",
-		"users_collection": "users_dev",
 	},
 }
 
@@ -82,9 +72,6 @@ if LIMA_ENV not in _ENVIRONMENTS:
 #: with the user's Firebase ID token.
 LIMA_BACKEND_URL = _ENVIRONMENTS[LIMA_ENV]["backend_url"]
 
-#: Firestore collection holding per-user docs, matched to the backend above.
-FIRESTORE_USERS_COLLECTION = _ENVIRONMENTS[LIMA_ENV]["users_collection"]
-
 
 def is_configured():
 	"""True when the values needed to run sign-in have been injected."""
@@ -96,6 +83,4 @@ def get_config():
 	from . import auth
 	return auth.FirebaseConfig(
 		GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, FIREBASE_API_KEY, FIREBASE_PROJECT_ID,
-		FIREBASE_DATABASE_ID or "(default)",
-		FIRESTORE_USERS_COLLECTION or "users",
 	)

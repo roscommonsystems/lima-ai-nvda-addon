@@ -34,10 +34,29 @@ from . import mouseclick
 from . import announcements
 from . import usage
 from . import signup
+from . import auth
 
 addonHandler.initTranslation()
 
 log = logging.getLogger(__name__)
+
+
+def _addon_version():
+	"""This add-on's version from its manifest, e.g. "0.6.0"; "" if it cannot be read."""
+	try:
+		return addonHandler.getCodeAddon().manifest["version"] or ""
+	except Exception:
+		log.debug("LIMA could not read its own add-on version", exc_info=True)
+		return ""
+
+
+def _nvda_version():
+	"""NVDA's version, e.g. "2026.3.1"; "unknown" if it cannot be read."""
+	try:
+		import buildVersion
+		return buildVersion.version or "unknown"
+	except Exception:
+		return "unknown"
 
 
 # Maps a selected reply language to the NVDA/synth locale, so a non-English reply is spoken
@@ -207,7 +226,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		# A pseudonymous per-computer ID (a one-way hash; see signup.device_id) that lets the
 		# backend limit new free accounts per computer. Read once: it does not change while
 		# NVDA runs, and "" just leaves the header off.
-		vision.DEVICE_ID = usage.DEVICE_ID = signup.device_id()
+		vision.DEVICE_ID = usage.DEVICE_ID = auth.DEVICE_ID = signup.device_id()
+		# The backend records each sign-in (who, from where, which add-on version), as
+		# lima-auth-server does for LIMA desktop; the add-on no longer writes to Firestore.
+		auth.SIGN_IN_URL = firebase_config.LIMA_BACKEND_URL + "/sign-in"
+		auth.ADDON_VERSION = _addon_version()
+		auth.USER_AGENT = "LIMA-NVDA/%s NVDA/%s" % (auth.ADDON_VERSION or "unknown", _nvda_version())
 		gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(settings.LimaSettingsPanel)
 		self._describing = False
 		# True while NVDA+Alt+U is waiting on the backend, so repeat presses do not stack requests.
