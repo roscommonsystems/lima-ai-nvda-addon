@@ -2,15 +2,15 @@
 # LIMA NVDA add-on: Google SSO via Firebase Authentication.
 # Standard library only; no NVDA imports so it stays unit-testable.
 #
-# Flow (all client-side, no backend):
+# Flow:
 #   1. Google OAuth 2.0 "installed app" loopback flow  -> Google ID token
 #   2. Firebase accounts:signInWithIdp (REST)          -> Firebase idToken + refreshToken + profile
-#   3. Firestore REST write of users/{uid}             -> email, display_name, account_created_at, last_login_at
-# The Firebase idToken is refreshed via securetoken.googleapis.com.
+#   3. POST to the LIMA backend's /sign-in             -> the backend records the profile
+# The Firebase idToken is refreshed via securetoken.googleapis.com. Since 0.6.0 the add-on
+# no longer writes to Firestore; the backend does, as it does for LIMA desktop.
 
 import base64
 import collections
-import datetime
 import hashlib
 import json
 import logging
@@ -32,19 +32,13 @@ GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 SIGN_IN_WITH_IDP_URL = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp"
 SECURE_TOKEN_URL = "https://securetoken.googleapis.com/v1/token"
-FIRESTORE_BASE = "https://firestore.googleapis.com/v1"
 
 OAUTH_SCOPES = ["openid", "email", "profile"]
 
 #: Project constants needed to run the flow. Values come from firebase_config.py.
-#: database_id is "(default)" unless the project uses a named Firestore database.
-#: users_collection isolates dev from prod (users_dev vs users) and MUST match the
-#: auth server's USERS_COLLECTION so the profile and the OpenRouter fields land in the
-#: same user document.
 FirebaseConfig = collections.namedtuple(
 	"FirebaseConfig",
-	["client_id", "client_secret", "api_key", "project_id", "database_id", "users_collection"],
-	defaults=["(default)", "users"],
+	["client_id", "client_secret", "api_key", "project_id"],
 )
 
 
@@ -192,100 +186,90 @@ def _session_from_idp(body):
 	}
 
 
-# --- Firestore ---------------------------------------------------------------
+# --- Sign-in profile (recorded by the LIMA backend) -------------------------
 
-def _now_rfc3339():
-	return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+#: Where the sign-in is reported: lima-addon-auth-server's POST /sign-in. Unset here for the
+#: same reason as vision.ENDPOINT_URL: the plugin assigns it at init from
+#: firebase_config.LIMA_BACKEND_URL, which binds the add-on to the dev or prod backend.
+SIGN_IN_URL = None
+
+#: This add-on's version, sent as X-LIMA-Addon-Version so the backend can tell when nobody is
+#: left on a version that wrote to Firestore itself. Assigned at init from the manifest.
+ADDON_VERSION = ""
+
+#: Sent as User-Agent and stored as the profile's user_agent. Assigned at init
+#: ("LIMA-NVDA/0.6.0 NVDA/2026.3"); this default is what a test or an unbuilt tree sends.
+USER_AGENT = "LIMA-NVDA"
+
+#: This computer's pseudonymous ID (signup.device_id()), sent as X-LIMA-Device like every
+#: other backend call. Assigned at init.
+DEVICE_ID = ""
 
 
-def get_user_document(project_id, uid, id_token, database_id="(default)", collection="users", timeout=30, _opener=None):
-	"""Return the {collection}/{uid} document, or None if it does not exist yet."""
-	url = "%s/projects/%s/databases/%s/documents/%s/%s" % (
-		FIRESTORE_BASE, project_id, database_id, collection, urllib.parse.quote(uid),
-	)
-	request = urllib.request.Request(
-		url, headers={"Authorization": "Bearer " + id_token}, method="GET"
-	)
-	raw = _send(request, timeout, _opener, not_found_ok=True)
-	if raw is None:
-		return None
-	return _parse_json(raw)
+def _system_region():
+	"""The user's Windows home region as an ISO 3166-1 alpha-2 code, e.g. "VN"; "" if unknown.
 
-
-def save_user_login(project_id, uid, id_token, email, display_name, include_created=False, database_id="(default)", collection="users", ip_address="", system_language="", user_agent="", country="", now=None, timeout=30, _opener=None):
-	"""Upsert the flat profile fields on users/{uid}, touching only what we set.
-
-	An updateMask lists exactly the fields written, so any other fields on the
-	document are preserved -- including the OpenRouter fields that
-	lima-addon-auth-server merges into this same document.
-	account_created_at is written only on the first sign-in;
-	ip_address/system_language/user_agent/country are written only when known.
-
-	Field names are snake_case as of September 2026, matching what the LIMA
-	servers write. They were camelCase before, and `createdAt` in particular
-	collided in meaning with lima-auth-server's `created_at` (which meant the
-	key's age, not the account's) -- hence `account_created_at` here, which says
-	which of the two this is. The mask entries must be renamed with the fields:
-	an updateMask path that names no field in the body deletes that field.
+	Copied from LIMA desktop (authentication.py). This is Settings > Time & language >
+	"Country or region", which Windows keeps separate from the display language: a user in
+	Vietnam running English Windows has a UI locale of en-US but a home region of VN. The
+	backend uses it only when LemonSqueezy has no billing country for the user.
 	"""
-	now = now or _now_rfc3339()
-	fields = {
-		"email": {"stringValue": email},
-		"display_name": {"stringValue": display_name},
-		"last_login_at": {"timestampValue": now},
+	try:
+		import ctypes
+		# GetUserDefaultGeoName needs Windows 10 1709+; older builds fall through to "".
+		buf = ctypes.create_unicode_buffer(16)
+		if ctypes.windll.kernel32.GetUserDefaultGeoName(buf, len(buf)) and buf.value:
+			region = buf.value.strip().upper()
+			# Windows also returns UN M.49 numbers for regions that are not countries,
+			# "001" (World) above all, for users who never set one. Only alpha-2 is a country.
+			if len(region) == 2 and region.isalpha() and region.isascii():
+				return region
+	except Exception:
+		log.debug("LIMA auth could not read the Windows home region", exc_info=True)
+	return ""
+
+
+def record_sign_in(id_token, timeout=15, _opener=None):
+	"""Ask the LIMA backend to record this sign-in. Returns True when it did. Never raises.
+
+	The backend writes the profile with its own service account, as lima-auth-server does
+	for LIMA desktop: the email and name from the verified ID token, the IP address from its
+	own front end, and the country from LemonSqueezy, falling back to the Windows region sent
+	here. Before this, the add-on wrote the profile to Firestore itself.
+
+	A failure is logged and otherwise ignored. The profile is a record of the sign-in, and
+	the user is signed in whether or not it was saved.
+	"""
+	if not SIGN_IN_URL:
+		log.error("auth.SIGN_IN_URL is unset; the LIMA backend URL was never configured")
+		return False
+	headers = {
+		"Authorization": "Bearer " + id_token,
+		"Content-Type": "application/json",
+		"User-Agent": USER_AGENT,
 	}
-	mask = ["email", "display_name", "last_login_at"]
-	if include_created:
-		fields["account_created_at"] = {"timestampValue": now}
-		mask.append("account_created_at")
-	# Environment fields: only write the ones we actually captured, so a failed
-	# lookup never overwrites a previously stored value with a blank.
-	for name, value in (("ip_address", ip_address), ("system_language", system_language), ("user_agent", user_agent), ("country", country)):
-		if value:
-			fields[name] = {"stringValue": value}
-			mask.append(name)
-
-	query = "&".join("updateMask.fieldPaths=" + p for p in mask)
-	url = "%s/projects/%s/databases/%s/documents/%s/%s?%s" % (
-		FIRESTORE_BASE, project_id, database_id, collection, urllib.parse.quote(uid), query,
-	)
-	data = json.dumps({"fields": fields}).encode("utf-8")
-	request = urllib.request.Request(
-		url,
-		data=data,
-		headers={"Content-Type": "application/json", "Authorization": "Bearer " + id_token},
-		method="PATCH",
-	)
-	return _parse_json(_send(request, timeout, _opener))
-
-
-def _store_user(config, session, _opener=None):
-	existing = get_user_document(
-		config.project_id, session["uid"], session["idToken"],
-		database_id=config.database_id, collection=config.users_collection, _opener=_opener,
-	)
-	# Both spellings count. `createdAt` is what add-on versions before the
-	# September 2026 rename wrote, and this is a desktop add-on: those versions
-	# stay in use for as long as users take to upgrade. Reading only the new name
-	# would treat every one of those users as signing in for the first time and
-	# stamp today's date over their real one, silently and unrecoverably.
-	fields_present = existing.get("fields", {}) if existing else {}
-	has_created = "account_created_at" in fields_present or "createdAt" in fields_present
-	save_user_login(
-		config.project_id,
-		session["uid"],
-		session["idToken"],
-		session["email"],
-		session["displayName"],
-		include_created=not has_created,
-		database_id=config.database_id,
-		collection=config.users_collection,
-		ip_address=session.get("ipAddress", ""),
-		system_language=session.get("systemLanguage", ""),
-		user_agent=session.get("userAgent", ""),
-		country=session.get("country", ""),
-		_opener=_opener,
-	)
+	if ADDON_VERSION:
+		headers["X-LIMA-Addon-Version"] = ADDON_VERSION
+	region = _system_region()
+	if region:
+		headers["X-LIMA-Region"] = region
+	if DEVICE_ID:
+		headers["X-LIMA-Device"] = DEVICE_ID
+	request = urllib.request.Request(SIGN_IN_URL, data=b"{}", headers=headers, method="POST")
+	opener = _opener or urllib.request.urlopen
+	try:
+		with opener(request, timeout=timeout) as response:
+			raw = response.read()
+	except urllib.error.HTTPError as e:
+		log.warning("LIMA sign-in was not recorded (HTTP %s)", getattr(e, "code", "?"))
+		return False
+	except (urllib.error.URLError, TimeoutError, OSError) as e:
+		log.warning("LIMA sign-in was not recorded: %r", e)
+		return False
+	try:
+		return bool(json.loads(raw.decode("utf-8")).get("recorded"))
+	except (ValueError, AttributeError):
+		return False
 
 
 # --- Loopback sign-in --------------------------------------------------------
@@ -442,55 +426,12 @@ def _wait_for_redirect(server, timeout):
 	raise AuthError("timeout")
 
 
-IP_SERVICE_URL = "https://www.cloudflare.com/cdn-cgi/trace"
-
-
-def _fetch_ip_and_country(timeout=5, _opener=None):
-	"""Best-effort (public_ip, country) via Cloudflare's trace; ("", "") on failure.
-
-	A desktop process cannot see its own public IP, so this makes one small
-	outbound request. Cloudflare's trace returns "key=value" lines; we read "ip="
-	and "loc=" (a two-letter country code). It never raises — both are optional.
-	"""
-	try:
-		opener = _opener or urllib.request.urlopen
-		request = urllib.request.Request(IP_SERVICE_URL, headers={"User-Agent": "LIMA-NVDA-Addon"})
-		with opener(request, timeout=timeout) as response:
-			text = response.read().decode("ascii", "replace")
-		values = {}
-		for line in text.splitlines():
-			key, sep, value = line.partition("=")
-			if sep:
-				values[key] = value.strip()
-		ip = values.get("ip", "")
-		country = values.get("loc", "")
-		return (ip if 0 < len(ip) <= 45 else ""), (country if 0 < len(country) <= 8 else "")
-	except Exception as e:
-		log.info("LIMA auth could not determine public IP/country: %r", e)
-		return "", ""
-
-
-def _system_language():
-	"""Return the Windows UI locale as a BCP-47 tag (e.g. "en-US"); "" if unknown."""
-	try:
-		import ctypes
-		buf = ctypes.create_unicode_buffer(85)  # LOCALE_NAME_MAX_LENGTH
-		if ctypes.windll.kernel32.GetUserDefaultLocaleName(buf, len(buf)):
-			return buf.value
-	except Exception:
-		pass
-	try:
-		import locale
-		return locale.getdefaultlocale()[0] or ""
-	except Exception:
-		return ""
-
-
 def run_sign_in(config, timeout=180, open_browser=True, _opener=None):
 	"""Drive the full Google SSO flow and return a session dict.
 
 	Opens the user's default browser, waits for the loopback redirect, exchanges
-	the code for a Firebase session, and records the user in Firestore. Blocks
+	the code for a Firebase session, and asks the LIMA backend to record the
+	sign-in (record_sign_in). Blocks
 	until the user finishes in the browser, so call it off NVDA's main thread.
 	"""
 	if not (config.client_id and config.api_key and config.project_id):
@@ -511,7 +452,7 @@ def run_sign_in(config, timeout=180, open_browser=True, _opener=None):
 		if open_browser:
 			_open_browser(auth_url)
 
-		code, got_state, user_agent = _wait_for_redirect(server, timeout)
+		code, got_state, _browser_user_agent = _wait_for_redirect(server, timeout)
 	finally:
 		server.close()
 
@@ -531,12 +472,7 @@ def run_sign_in(config, timeout=180, open_browser=True, _opener=None):
 	if not session["uid"] or not session["idToken"]:
 		raise AuthError("auth_error")
 
-	# Environment metadata recorded alongside the profile.
-	session["userAgent"] = user_agent  # real browser UA from the redirect request
-	session["systemLanguage"] = _system_language()
-	session["ipAddress"], session["country"] = _fetch_ip_and_country()
-
-	_store_user(config, session, _opener=_opener)
+	record_sign_in(session["idToken"], _opener=_opener)
 	return session
 
 

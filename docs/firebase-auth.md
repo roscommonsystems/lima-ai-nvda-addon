@@ -8,12 +8,14 @@ Cloud consoles, and how the flow works at runtime.
 
 ## 1. Goal
 
-Let a user **sign in with their Google account** from inside NVDA, and **store
-their profile** (email, display name, first-login and last-login timestamps) in
-**Cloud Firestore** — sign-in is purely for identifying the user and recording their details.
+Let a user **sign in with their Google account** from inside NVDA, so the LIMA
+backend (`lima-addon-auth-server`) knows who they are, and record the sign-in
+(email, name, first and last sign-in, IP address, country, add-on version).
 
-Because there is no enforcement, the whole thing is **client-side**: the add-on
-talks to Google and Firebase directly over REST. No backend server is required.
+The add-on talks to Google and Firebase directly over REST to sign in. It then
+tells the backend about the sign-in, and **the backend writes the profile** to
+Cloud Firestore with its own service account, as `lima-auth-server` does for
+LIMA desktop. Since 0.6.0 the add-on does not write to Firestore.
 
 ---
 
@@ -30,8 +32,8 @@ The supported path for a desktop app is therefore:
 1. **Google OAuth 2.0 "installed app" loopback flow** to get a Google ID token.
 2. **Firebase Auth REST API** (`accounts:signInWithIdp`) to exchange that Google
    token for a Firebase session.
-3. **Firestore REST API** to write the user document, authorized with the
-   Firebase ID token and protected by Firestore security rules.
+3. **`POST /sign-in` on the LIMA backend**, authorized with the Firebase ID
+   token. The backend verifies the token and writes the profile.
 
 To keep the add-on dependency-free (it is otherwise standard-library only), the
 OAuth loopback is **hand-rolled** instead of pulling in `google-auth-oauthlib`.
@@ -49,14 +51,23 @@ exchange.
 NVDA add-on (pure Python, stdlib only)
   1. Google OAuth loopback  ──►  Google ID token
   2. signInWithIdp (REST)   ──►  Firebase idToken + refreshToken + profile
-  3. Firestore REST write   ──►  users/{uid}: email, display_name, account_created_at, last_login_at
-                                  (authorized with the Firebase idToken)
+  3. POST /sign-in          ──►  lima-addon-auth-server
+                                  (Bearer: the Firebase idToken;
+                                   headers: User-Agent, X-LIMA-Addon-Version,
+                                   X-LIMA-Region, X-LIMA-Device)
+                                          │
+                                          ▼
+                                  users/{uid}: email, display_name, ip_address, country,
+                                  addon_version, account_created_at, last_login_at, ...
 
-The profile write goes straight to Firestore, with no server in between.
-Firestore security rules let a user read only their own users/{uid}
-document and write only its profile fields. The other fields on that
-document (plan, OpenRouter key) are written by lima-addon-auth-server.
+Only the backend writes to Firestore, as for LIMA desktop. The email and
+name come from the verified token and the IP address from the backend's
+own front end, so the add-on cannot fake them.
 ```
+
+Add-ons up to 0.5.0 wrote the profile to Firestore themselves. The Firestore
+rules still let them, for their profile fields only (see Part 4), until nobody
+is left on those versions.
 
 ---
 
@@ -64,10 +75,10 @@ document (plan, OpenRouter key) are written by lima-addon-auth-server.
 
 | File | Role |
 |------|------|
-| `addon/globalPlugins/lima/auth.py` | All the flow logic: PKCE loopback OAuth, code exchange, `signInWithIdp`, Firestore upsert, and token refresh. NVDA-free so it is unit-testable. |
+| `addon/globalPlugins/lima/auth.py` | All the flow logic: PKCE loopback OAuth, code exchange, `signInWithIdp`, reporting the sign-in to the backend (`record_sign_in`), and token refresh. NVDA-free so it is unit-testable. |
 | `addon/globalPlugins/lima/firebase_config.py` | The four project constants (client id/secret, Firebase API key, project id) plus `is_configured()` / `get_config()` helpers. |
 | `addon/globalPlugins/lima/settings.py` | The "Google account" section in NVDA settings: **Sign in with Google** / **Sign out** button, status line, and session storage helpers. |
-| `tests/test_auth.py` | Unit tests for the pure functions (PKCE, auth URL, code exchange, IdP sign-in, refresh, Firestore masks, error mapping). |
+| `tests/test_auth.py` | Unit tests for the pure functions (PKCE, auth URL, code exchange, IdP sign-in, refresh, the backend sign-in call, the Windows region, error mapping). |
 
 The four constants that must be filled in live in `firebase_config.py`:
 
@@ -139,9 +150,10 @@ until 27 November 2026. It let any signed-in user edit the server's fields on
 their own document: for example, setting `plan_tier` made the server mint them a
 new free key on every request.
 
-**If the add-on starts writing a new field**, add it to `profileFields()` and
-deploy the rules *before* releasing that add-on version. Otherwise Firestore
-refuses the sign-in write with `403 PERMISSION_DENIED`.
+These rules exist for add-ons up to 0.5.0, which write their profile to
+Firestore themselves. From 0.6.0 the add-on writes nothing there. Once the
+backend's `addon_version` field shows nobody is left on 0.5.0 or older, the
+rules can deny clients completely, as LIMA desktop's database does.
 
 ### Part 5 — Google Cloud OAuth → `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
 Switch to https://console.cloud.google.com with the **same project** selected.
@@ -183,12 +195,12 @@ panel so NVDA's UI does not freeze):
    Google **id_token**.
 6. **`signInWithIdp`** posts the Google id_token to Firebase → Firebase
    **idToken** + **refreshToken** + profile (`localId`, `email`, `displayName`).
-7. **Firestore write.** `get_user_document` checks whether `users/{uid}` exists;
-   `save_user_login` then upserts `email`, `display_name`, `last_login_at` always,
-   and `account_created_at` only on the first sign-in. An `updateMask` is used so
-   only these fields are touched and any other fields on the doc are preserved —
-   including the OpenRouter fields `lima-addon-auth-server` merges into the same
-   document.
+7. **Record the sign-in.** `record_sign_in` POSTs an empty body to the backend's
+   `/sign-in` with the Firebase idToken, the add-on's `User-Agent` and
+   `X-LIMA-Addon-Version`, the Windows "Country or region" in `X-LIMA-Region`
+   (`_system_region`, copied from LIMA desktop), and `X-LIMA-Device`. The backend
+   writes the profile. A failure is logged and ignored: the user is signed in
+   either way.
 8. The session (`uid`, `email`, `displayName`, `idToken`, `refreshToken`,
    `expiresAt`) is returned; the settings panel stores the refresh token and
    profile in NVDA config and updates the UI.
@@ -200,44 +212,41 @@ launch.
 
 ---
 
-## 7. Firestore document shape
+## 7. What the backend records
 
-`users/{uid}`:
+`users/{uid}` (`users_dev/{uid}` on dev), written by `lima-addon-auth-server`:
 
-| Field | Type | When written |
-|-------|------|--------------|
-| `email` | string | every sign-in |
-| `display_name` | string | every sign-in |
-| `account_created_at` | timestamp | first sign-in only |
-| `last_login_at` | timestamp | every sign-in |
-| `ip_address` · `system_language` · `user_agent` · `country` | string | every sign-in, when captured |
+| Field | From | When |
+|-------|------|------|
+| `uid`, `email`, `display_name` | the verified ID token | every sign-in |
+| `ip_address` | the backend's own front end | every sign-in |
+| `user_agent` | `User-Agent`, e.g. `LIMA-NVDA/0.6.0 NVDA/2026.3.1` | every sign-in |
+| `addon_version` | `X-LIMA-Addon-Version` | every sign-in |
+| `country`, `country_source` | LemonSqueezy billing country, else `X-LIMA-Region` | when known; a region never replaces a billing country |
+| `last_login_at` | the backend's clock | every sign-in |
+| `account_created_at` | the backend's clock | first sign-in only |
 
-`{uid}` is the Firebase user id (`localId`), stable per Google account per
-project.
+This is the same set, with the same country rules, that `lima-auth-server`
+stores for LIMA desktop. `{uid}` is the Firebase user id (`localId`), stable per
+Google account per project.
 
-**Field names are snake_case** as of September 2026, matching what the LIMA
-servers write into these same documents. `createdAt` became `account_created_at`
-specifically: it sat beside lima-auth-server's `created_at`, which means the
-*key's* age rather than the *account's*, and the two read as one duplicated field
-while actually diverging on every tier change.
-
-The write-once guard in `_store_user` reads **both** spellings of the created
-date. This is a desktop add-on, so builds predating the rename stay in use until
-users upgrade and keep writing `createdAt`; a guard reading only the new name
-would treat each of those users as brand new and overwrite their real signup date
-with today's. `lima-addon-auth-server/migrate_field_names.py` clears the retired
-names, and is idempotent so it can be re-run as stragglers upgrade.
+**What changed in 0.6.0.** Earlier add-ons wrote `email`, `display_name`,
+`last_login_at`, `account_created_at`, `ip_address`, `system_language`,
+`user_agent` (the browser's) and `country` themselves. The IP address and
+country came from Cloudflare's trace (`cdn-cgi/trace`). `system_language` is
+no longer recorded: LIMA desktop dropped it because it was mistaken for a
+country.
 
 ---
 
 ## 8. Security notes
 
-- **Direct client writes are safe** only because the Firestore rules limit each
-  user to the profile fields of their own `users/{uid}` document. Matching the uid
-  is not enough on its own: the same document holds fields the server trusts
-  (`plan_tier`, `openrouter_hash`, `key_delete_at`, `openrouter_hash_to_delete`),
-  so a rule that allows every field lets users change their own plan or have the
-  server delete OpenRouter keys. Do not loosen the field list.
+- **The add-on does not write to Firestore.** The backend does, with its own
+  service account, so nothing the add-on sends can change a user's plan or key.
+  Add-ons up to 0.5.0 still write their profile directly, and the Firestore rules
+  limit them to the profile fields of their own `users/{uid}` document. Matching
+  the uid alone was not enough: the same document holds fields the server trusts
+  (`plan_tier`, `openrouter_hash`, `key_delete_at`, `openrouter_hash_to_delete`).
 - **The desktop client secret is not confidential.** Google explicitly treats
   desktop OAuth client secrets as non-secret; PKCE is the real protection. It is
   therefore acceptable to ship it inside the add-on.
