@@ -159,6 +159,32 @@ def test_save_user_login_omits_environment_fields_when_blank():
 		assert "updateMask.fieldPaths=" + path not in request.full_url
 
 
+# The Firestore rules (lima-addon-auth-server/firestore/firestore.rules, profileFields())
+# refuse any field not on this list. Adding a field here without adding it to the rules,
+# and deploying them first, breaks sign-in for everyone on the new version.
+FIELDS_THE_RULES_ALLOW = {
+	"email", "display_name", "last_login_at", "account_created_at",
+	"ip_address", "system_language", "user_agent", "country",
+}
+
+
+def test_save_user_login_writes_only_fields_the_firestore_rules_allow():
+	captured = {}
+	auth.save_user_login(
+		"proj", "uid-9", "tok", "a@b.com", "Ada",
+		include_created=True,
+		ip_address="203.0.113.5", system_language="en-US",
+		user_agent="Mozilla/5.0 (Windows NT 10.0)", country="SG",
+		_opener=_fake_opener(raw_bytes=b"{}", capture=captured),
+	)
+	request = captured["request"]
+	body = json.loads(request.data.decode("utf-8"))
+	masked = {p.split("=", 1)[1] for p in request.full_url.split("?", 1)[1].split("&")}
+	assert set(body["fields"]) <= FIELDS_THE_RULES_ALLOW, \
+		"new Firestore field: add it to profileFields() in the rules and deploy them first"
+	assert masked == set(body["fields"])
+
+
 def test_save_user_login_returning_user_omits_created_at():
 	captured = {}
 	auth.save_user_login(

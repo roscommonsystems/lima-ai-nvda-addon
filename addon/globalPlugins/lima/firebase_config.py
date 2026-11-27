@@ -9,8 +9,10 @@
 #
 # Also required in the consoles (no code change needed):
 #   * Firebase -> Authentication -> Sign-in method -> enable Google.
-#   * Firestore rule so each user can only write their own doc:
-#       match /users/{uid} { allow read, write: if request.auth.uid == uid; }
+#   * Firestore rules that let each user write only the profile fields of their own
+#     doc. They live in lima-addon-auth-server/firestore/ (see docs/firebase-auth.md).
+#     A new field written by auth.save_user_login must be added there first, or
+#     sign-in gets 403 PERMISSION_DENIED.
 
 try:
 	from . import secret_config
